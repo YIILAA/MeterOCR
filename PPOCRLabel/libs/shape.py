@@ -48,26 +48,24 @@ class Shape(object):
 
     def __init__(
         self,
-        title=None,
-        is_mark=False,
         label=None,
+        is_mark=False,
+        content=None,
         line_color=None,
         difficult=False,
-        key_cls="None",
         paintLabel=False,
         paintIdx=False,
     ):
         # === new key ===
-        self.title = title
+        self.label = label
         self.is_mark = False
         # === new key ===
-        self.label = label
+        self.content = content
         self.idx = None  # bbox order, only for table annotation
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
-        self.key_cls = key_cls  # todo: remove
         self.paintLabel = paintLabel
         self.paintIdx = paintIdx
         self.locked = False
@@ -256,6 +254,8 @@ class Shape(object):
 
     def copy(self):
         shape = Shape("%s" % self.label)
+        shape.is_mark = self.is_mark
+        shape.content = self.content
         shape.points = [p for p in self.points]
         shape.center = self.center
         shape.direction = self.direction
@@ -267,7 +267,6 @@ class Shape(object):
         if self.fill_color != Shape.fill_color:
             shape.fill_color = self.fill_color
         shape.difficult = self.difficult
-        shape.key_cls = self.key_cls
         return shape
 
     def __len__(self):

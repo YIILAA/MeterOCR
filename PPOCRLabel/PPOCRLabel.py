@@ -58,6 +58,8 @@ from PyQt5.QtWidgets import (
     QDialog,
     QAbstractItemView,
     QSizePolicy,
+    QButtonGroup,
+    QRadioButton,
 )
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
@@ -97,10 +99,10 @@ class MainWindow(QMainWindow):
         self,
         lang="ch",
         gpu=False,
-        kie_mode=False,
         default_filename=None,
         default_predefined_class_file=None,
-        default_save_dir=None,
+        default_save_dir_0=None,
+        default_save_dir_1=None,
     ):
         super(MainWindow, self).__init__()
         self.setWindowTitle(__appname__)
@@ -121,13 +123,7 @@ class MainWindow(QMainWindow):
         )  # 'en'
         getStr = lambda strId: self.stringBundle.getString(strId)
 
-        # KIE setting
-        self.kie_mode = kie_mode
-        self.key_previous_text = ""
-        self.existed_key_cls_set = set()
-        self.key_dialog_tip = getStr("keyDialogTip")
-
-        self.defaultSaveDir = default_save_dir
+        self.defaultSaveDir = [default_save_dir_0, default_save_dir_1]
         self.ocr = PaddleOCR(
             use_pdserving=False,
             use_angle_cls=True,
@@ -137,46 +133,46 @@ class MainWindow(QMainWindow):
             lang=lang,
             show_log=False,
         )
-        self.table_ocr = PPStructure(
-            use_pdserving=False, use_gpu=gpu, lang=lang, layout=False, show_log=False
-        )
 
         if os.path.exists("./data/paddle.png"):
             result = self.ocr.ocr("./data/paddle.png", cls=True, det=True)
-            # result = self.table_ocr('./data/paddle.png', return_ocr_result_in_table=True)
 
         # For loading all image under a directory
-        self.mImgList = []  # TODO 区分两个文件列表
+        self.mImgList = [[], []]  # 区分两个文件列表
         self.mImgList5 = []
-        self.dirname = None
-        self.labelHist = []
-        self.lastOpenDir = None
-        self.result_dic = []
+        self.dirname = [None, None]  # 两个文件目录
+        self.labelHist = []  # TODO
+        self.lastOpenDir = [None, None]
+        self.result_dic = []  # 当前操作文件存储的shape信息
         self.result_dic_locked = []
-        self.changeFileFolder = False
+        # self.changeFileFolder = False # 好像没用
         self.haveAutoReced = False
-        self.labelFile = None
-        self.currIndex = 0
+        # self.labelFile = None # 好像没用
+        self.currIndex = [0, 0]
 
         # Whether we need to save or not.
-        self.dirty = False
+        self.dirty = [False, False]
+
+        self.showMode = 0  # 当前canva上展示的类型 0/1
+        self.operateMode = 0  # 操作类型
 
         self._noSelectionSlot = False
-        self._beginner = True
+        self._beginner = True  # 什么用？
         self.screencastViewer = self.getAvailableScreencastViewer()
         self.screencast = "https://github.com/PaddlePaddle/PaddleOCR"
 
         # Load predefined classes to the list
-        self.loadPredefinedClasses(default_predefined_class_file)
+        self.loadPredefinedClasses(default_predefined_class_file)  # 好像没用 待去除
 
         # Main widgets and related state.
-        self.labelDialog = LabelDialog(parent=self, listItem=self.labelHist)
+        self.labelDialog = LabelDialog(
+            parent=self, listItem=self.labelHist
+        )  # TODO 添加字段
         self.autoDialog = AutoDialog(parent=self)
 
         self.itemsToShapes = {}
         self.shapesToItems = {}
-        self.itemsToShapesbox = {}
-        self.shapesToItemsbox = {}
+        # 可能需要添加contentToShapes
         self.prevLabelText = getStr("tempLabel")
         self.noLabelText = getStr("nullLabel")
         self.model = "paddle"
@@ -190,26 +186,32 @@ class MainWindow(QMainWindow):
         #  ================== File List  ==================
         # self.templateFileListDock
         self.templateFileListWidget = QListWidget()
-        self.templateFileListWidget.itemClicked.connect(self.fileitemDoubleClicked)
+        self.templateFileListWidget.itemClicked.connect(
+            partial(self.fileitemDoubleClicked, mode=0)
+        )
         self.templateFileListWidget.setIconSize(QSize(25, 25))
 
         self.templateFileListName = getStr("templateFileList")
         self.templateFileListDock = QDockWidget(self.templateFileListName, self)
         self.templateFileListDock.setWidget(self.templateFileListWidget)
 
-        # self.templateFileListDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.templateFileListDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         #  ================== Buttons  ==================
         # templateToolBoxContainer
-        self.newButton = QToolButton()
-        self.newButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.newButton_0 = QToolButton()
+        self.newButton_0.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        self.saveButton = QToolButton()
-        self.saveButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.checkButton_0 = QToolButton()
+        self.checkButton_0.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
+        self.saveLabelButton_0 = QToolButton()
+        self.saveLabelButton_0.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         templateToolBox = QGridLayout()
-        templateToolBox.addWidget(self.newButton, 0, 0, 1, 1)
-        templateToolBox.addWidget(self.saveButton, 0, 1, 1, 1)
+        templateToolBox.addWidget(self.newButton_0, 0, 0, 1, 1)
+        templateToolBox.addWidget(self.checkButton_0, 0, 1, 1, 1)
+        templateToolBox.addWidget(self.saveLabelButton_0, 1, 0, 1, 2)
         templateToolBoxContainer = QWidget()
         templateToolBoxContainer.setLayout(templateToolBox)
 
@@ -224,7 +226,9 @@ class MainWindow(QMainWindow):
         self.templateIndexList.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )  # no editable
-        self.templateIndexList.itemSelectionChanged.connect(self.indexSelectionChanged)
+        self.templateIndexList.itemSelectionChanged.connect(
+            partial(self.indexSelectionChanged, mode=0)
+        )
         self.templateIndexList.setVerticalScrollBarPolicy(
             Qt.ScrollBarAlwaysOff
         )  # no scroll Bar
@@ -241,7 +245,9 @@ class MainWindow(QMainWindow):
         # Create and add a widget for showing current label items
         self.templateLabelList = EditInList()
 
-        self.templateLabelList.itemSelectionChanged.connect(self.labelSelectionChanged)
+        self.templateLabelList.itemSelectionChanged.connect(
+            partial(self.labelSelectionChanged, mode=0)
+        )
         self.templateLabelList.clicked.connect(self.templateLabelList.item_clicked)
 
         # Connect to itemChanged to detect checkbox changes.
@@ -279,8 +285,12 @@ class MainWindow(QMainWindow):
         self.templateLabelListBar = self.templateLabelList.verticalScrollBar()
         self.templateIndexListBar = self.templateIndexList.verticalScrollBar()
 
-        self.templateLabelListBar.valueChanged.connect(self.move_scrollbar)  # TODO 两边不同
-        self.templateIndexListBar.valueChanged.connect(self.move_scrollbar)
+        self.templateLabelListBar.valueChanged.connect(
+            partial(self.move_scrollbar, mode=0)
+        )
+        self.templateIndexListBar.valueChanged.connect(
+            partial(self.move_scrollbar, mode=0)
+        )
 
         #  ================== 左侧整体的设置  ==================
         # templateLayout 添加三个子组件
@@ -296,7 +306,7 @@ class MainWindow(QMainWindow):
         self.templateDock.setWidget(templateContainer)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.templateDock)
 
-        self.templateDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        # self.templateDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         #  ================================= Right Area - Begin =================================
         recogLayout = QVBoxLayout()
@@ -305,25 +315,27 @@ class MainWindow(QMainWindow):
         #  ================== File List  ==================
         # self.recogFileListDock
         self.recogFileListWidget = QListWidget()
-        self.recogFileListWidget.itemClicked.connect(self.fileitemDoubleClicked)
+        self.recogFileListWidget.itemClicked.connect(
+            partial(self.fileitemDoubleClicked, mode=1)
+        )
         self.recogFileListWidget.setIconSize(QSize(25, 25))
 
         self.recogFileListName = getStr("recogFileList")
         self.recogFileListDock = QDockWidget(self.recogFileListName, self)
         self.recogFileListDock.setWidget(self.recogFileListWidget)
 
-        # self.recogFileListDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.recogFileListDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         # ================== current template  ==================
         # self.templateShowBoxContainer
         templateShowBox = QHBoxLayout()
 
         showText = QLabel()
-        showText.setText("current template")
+        showText.setText("choose template")
         templateShowBox.addWidget(showText)
 
         templateThumbnail = QLabel()
-        templateThumbnail.setText("todo: img")
+        templateThumbnail.setText("TODO: input filename")
         templateShowBox.addWidget(templateThumbnail)
 
         self.templateShowBoxContainer = QWidget()
@@ -336,16 +348,22 @@ class MainWindow(QMainWindow):
         self.AutoRecognition.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.AutoRecognition.setIcon(newIcon("Auto"))
 
-        # 新建矩形 self.newButton 前面定义了 TODO 是否要用不同的按钮
+        # 新建矩形
+        self.newButton_1 = QToolButton()
+        self.newButton_1.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         # 重新识别
         self.reRecogButton = QToolButton()
         self.reRecogButton.setIcon(newIcon("reRec", 30))
         self.reRecogButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
+        # check当前图像
+        self.checkButton_1 = QToolButton()
+        self.checkButton_1.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
         # 保存识别结果
-        self.saveRecogButton = QToolButton()
-        self.saveRecogButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.saveLabelButton_1 = QToolButton()
+        self.saveLabelButton_1.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         # TODO 设置相应的函数，或者用一样的saveButton，根据模式判断？还是分开吧，可以选择保存一种或都保存
 
         # self.DelButton = QToolButton()
@@ -353,9 +371,10 @@ class MainWindow(QMainWindow):
 
         recogToolBox = QGridLayout()
         recogToolBox.addWidget(self.AutoRecognition, 0, 0, 1, 1)
-        recogToolBox.addWidget(self.newButton, 0, 1, 1, 1)
+        recogToolBox.addWidget(self.newButton_1, 0, 1, 1, 1)
         recogToolBox.addWidget(self.reRecogButton, 1, 0, 1, 1)
-        recogToolBox.addWidget(self.saveRecogButton, 1, 1, 1, 1)
+        recogToolBox.addWidget(self.checkButton_1, 1, 1, 1, 1)
+        recogToolBox.addWidget(self.saveLabelButton_1, 2, 0, 1, 2)
         recogToolBoxContainer = QWidget()
         recogToolBoxContainer.setLayout(recogToolBox)
 
@@ -370,7 +389,9 @@ class MainWindow(QMainWindow):
         self.recogIndexList.setEditTriggers(
             QAbstractItemView.NoEditTriggers
         )  # no editable
-        self.recogIndexList.itemSelectionChanged.connect(self.indexSelectionChanged)
+        self.recogIndexList.itemSelectionChanged.connect(
+            partial(self.indexSelectionChanged, mode=1)
+        )
         self.recogIndexList.setVerticalScrollBarPolicy(
             Qt.ScrollBarAlwaysOff
         )  # no scroll Bar
@@ -388,7 +409,9 @@ class MainWindow(QMainWindow):
         self.recogLabelList = QListWidget()
         # 不可编辑
         self.recogLabelList.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.recogLabelList.itemSelectionChanged.connect(self.labelSelectionChanged)
+        self.recogLabelList.itemSelectionChanged.connect(
+            partial(self.labelSelectionChanged, mode=1)
+        )
 
         self.recogLabelListDockName = getStr("recogLabel")
         self.recogLabelListDock = QDockWidget(self.recogLabelListDockName, self)
@@ -441,9 +464,15 @@ class MainWindow(QMainWindow):
         self.recogLabelListBar = self.recogLabelList.verticalScrollBar()
         self.recogContentListBar = self.recogContentList.verticalScrollBar()
 
-        self.recogIndexListBar.valueChanged.connect(self.move_scrollbar)  # TODO 两边不同
-        self.recogLabelListBar.valueChanged.connect(self.move_scrollbar)
-        self.recogContentListBar.valueChanged.connect(self.move_scrollbar)
+        self.recogIndexListBar.valueChanged.connect(
+            partial(self.move_scrollbar, mode=1)
+        )
+        self.recogLabelListBar.valueChanged.connect(
+            partial(self.move_scrollbar, mode=1)
+        )
+        self.recogContentListBar.valueChanged.connect(
+            partial(self.move_scrollbar, mode=1)
+        )
 
         #  ================== 右侧整体的设置  ==================
         # recogLayout 添加四个子组件
@@ -459,7 +488,7 @@ class MainWindow(QMainWindow):
         self.recogDock.setWidget(recogContainer)
         self.addDockWidget(Qt.RightDockWidgetArea, self.recogDock)
 
-        self.recogDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        # self.recogDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         #  ================== Zoom Bar  ==================
         self.imageSlider = QSlider(Qt.Horizontal)
@@ -499,7 +528,7 @@ class MainWindow(QMainWindow):
         self.preButton.clicked.connect(self.openPrevImg)
         self.preButton.setStyleSheet("border: none;")
         self.preButton.setShortcut("a")
-        self.iconlist = QListWidget()
+        self.iconlist = QListWidget()  # canvas下面的thumbnail
         self.iconlist.setViewMode(QListView.IconMode)
         self.iconlist.setFlow(QListView.TopToBottom)
         self.iconlist.setSpacing(10)
@@ -515,7 +544,7 @@ class MainWindow(QMainWindow):
         self.nextButton.setIcon(newIcon("next", 40))
         self.nextButton.setIconSize(QSize(40, 100))
         self.nextButton.setStyleSheet("border: none;")
-        self.nextButton.clicked.connect(self.openNextImg)
+        self.nextButton.clicked.connect(partial(self.openNextImg, self.showMode))
         self.nextButton.setShortcut("d")
 
         hlayout.addWidget(self.preButton)
@@ -541,13 +570,28 @@ class MainWindow(QMainWindow):
         self.scrollArea = scroll
         self.canvas.scrollRequest.connect(self.scrollRequest)
 
-        self.canvas.newShape.connect(partial(self.newShape, False))
+        self.canvas.newShape.connect(partial(self.newShape, False, mode=self.showMode))
         # self.canvas.shapeMoved.connect(self.updateBoxlist)  # self.setDirty
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
 
+        #  ================== Buttons ==================
+        self.modeButtonGroup = QButtonGroup()
+        self.modeButton_0 = QRadioButton(getStr("defineTemplate"))
+        self.modeButton_1 = QRadioButton(getStr("beginRecognize"))
+        self.modeButtonGroup.addButton(self.modeButton_0, 0)
+        self.modeButtonGroup.addButton(self.modeButton_1, 1)
+        self.modeButtonGroup.buttonClicked.connect(self.modeChanged)
+
+        self.modeButton_0.setChecked(True)
+
+        modeButtonLayout = QHBoxLayout()
+        modeButtonLayout.addWidget(self.modeButton_0)
+        modeButtonLayout.addWidget(self.modeButton_1)
+
         centerLayout = QVBoxLayout()
         centerLayout.setContentsMargins(0, 0, 0, 0)
+        centerLayout.addItem(modeButtonLayout)
         centerLayout.addWidget(scroll)
         centerLayout.addWidget(iconListContainer, 0, Qt.AlignCenter)
         centerContainer = QWidget()
@@ -559,27 +603,52 @@ class MainWindow(QMainWindow):
         action = partial(newAction, self)  # text, slot, ...
         quit = action(getStr("quit"), self.close, "Ctrl+Q", "quit", getStr("quitApp"))
 
-        # TODO: 区别两个目录
-        opendir = action(
-            getStr("openDir"), self.openDirDialog, "Ctrl+u", "open", getStr("openDir")
-        )
-
-        # open_dataset_dir = action(
-        #     getStr("openDatasetDir"),
-        #     self.openDatasetDirDialog,
-        #     "Ctrl+p",
-        #     "open",
-        #     getStr("openDatasetDir"),
-        #     enabled=False,
+        # 区别两个目录
+        # opendir = action(
+        #     getStr("openDir"), self.openDirDialog, "Ctrl+u", "open", getStr("openDir")
         # )
 
-        # TODO：区别两种保存，不同的目录
-        save = action(
-            getStr("save"),
-            self.saveFile,
+        openDir_0 = action(
+            getStr("openDir_0"),
+            partial(self.openDirDialog, mode=0),
+            "Ctrl+u",
+            "open",
+            getStr("openDir_0"),
+        )
+
+        openDir_1 = action(
+            getStr("openDir_1"),
+            partial(self.openDirDialog, mode=1),
+            "Ctrl+u",
+            "open",
+            getStr("openDir_1"),
+        )
+
+        # 区别两种保存，不同的目录
+        # 这个是保存单个文件的label？
+        # save = action(
+        #     getStr("save"),
+        #     self.saveFile,
+        #     "Ctrl+V",
+        #     "verify",
+        #     getStr("saveDetail"),
+        #     enabled=False,
+        # )
+        check_0 = action(
+            getStr("check"),
+            partial(self.saveFile, mode=0),
             "Ctrl+V",
             "verify",
-            getStr("saveDetail"),
+            getStr("checkFile"),
+            enabled=False,
+        )
+
+        check_1 = action(
+            getStr("check"),
+            partial(self.saveFile, mode=1),
+            "Ctrl+V",
+            "verify",
+            getStr("checkFile"),
             enabled=False,
         )
 
@@ -757,6 +826,7 @@ class MainWindow(QMainWindow):
 
         #  ================== New Actions ==================
 
+        # 编辑对象是当前展示图像 当前选中shape
         edit = action(
             getStr("editLabel"),
             self.editLabel,
@@ -802,17 +872,6 @@ class MainWindow(QMainWindow):
             enabled=False,
         )
 
-        """
-        tableRec = action(
-            getStr("TableRecognition"),
-            self.TableRecognition,
-            "",
-            "Auto",
-            getStr("TableRecognition"),
-            enabled=False,
-        )
-        """
-
         cellreRec = action(
             getStr("cellreRecognition"),
             self.cellreRecognition,
@@ -822,32 +881,43 @@ class MainWindow(QMainWindow):
             enabled=False,
         )
 
-        saveRec = action(
-            getStr("saveRec"),
-            self.saveRecResult,
-            "",
-            "save",
-            getStr("saveRec"),
-            enabled=False,
-        )
+        # # 保存crop的图像和单个结果
+        # saveRec = action(
+        #     getStr("saveRec"),
+        #     self.saveRecResult,
+        #     "",
+        #     "save",
+        #     getStr("saveRec"),
+        #     enabled=False,
+        # )
 
-        saveLabel = action(
-            getStr("saveLabel"),
-            self.saveLabelFile,  #
+        # 保存整个目录
+        # 区分两个目录
+        # saveLabel = action(
+        #     getStr("saveLabel"),
+        #     self.saveLabelFile,
+        #     "Ctrl+S",
+        #     "save",
+        #     getStr("saveLabel"),
+        #     enabled=False,
+        # )
+        saveLabel_0 = action(
+            getStr("saveLabel_0"),
+            partial(self.saveLabelFile, mode=0),
             "Ctrl+S",
             "save",
-            getStr("saveLabel"),
+            getStr("saveLabel_0"),
             enabled=False,
         )
 
-        """exportJSON = action(
-            getStr("exportJSON"),
-            self.exportJSON,
-            "",
+        saveLabel_1 = action(
+            getStr("saveLabel_1"),
+            partial(self.saveLabelFile, mode=1),
+            "Ctrl+S",
             "save",
-            getStr("exportJSON"),
+            getStr("saveLabel_1"),
             enabled=False,
-        )"""
+        )
 
         undoLastPoint = action(
             getStr("undoLastPoint"),
@@ -885,15 +955,6 @@ class MainWindow(QMainWindow):
             enabled=False,
         )
 
-        change_cls = action(
-            getStr("keyChange"),
-            self.change_box_key,
-            "Ctrl+X",
-            "edit",
-            getStr("keyChange"),
-            enabled=False,
-        )
-
         lock = action(
             getStr("lockBox"),
             self.lockSelectedShape,
@@ -904,17 +965,27 @@ class MainWindow(QMainWindow):
         )
 
         # self.editButton.setDefaultAction(edit)
-        self.newButton.setDefaultAction(create)
+        # self.newButton.setDefaultAction(create)
         # self.createpolyButton.setDefaultAction(createpoly)
         # self.DelButton.setDefaultAction(deleteImg)
         # self.SaveButton.setDefaultAction(save)
-        self.saveButton.setDefaultAction(save)  # TODO
+        # self.saveButton.setDefaultAction(save)  # TODO 保存单个文件
         # self.saveRecogButton.setDefaultAction() # TODO
-        self.AutoRecognition.setDefaultAction(AutoRec)
-        self.reRecogButton.setDefaultAction(reRec)
+        # self.AutoRecognition.setDefaultAction(AutoRec)
+        # self.reRecogButton.setDefaultAction(reRec)
         # self.tableRecButton.setDefaultAction(tableRec)
         # self.preButton.setDefaultAction(openPrevImg)
         # self.nextButton.setDefaultAction(openNextImg)
+
+        self.newButton_0.setDefaultAction(create)
+        self.checkButton_0.setDefaultAction(check_0)
+        self.saveLabelButton_0.setDefaultAction(saveLabel_0)
+
+        self.newButton_1.setDefaultAction(create)
+        self.checkButton_1.setDefaultAction(check_1)
+        self.saveLabelButton_1.setDefaultAction(saveLabel_1)
+        self.AutoRecognition.setDefaultAction(AutoRec)
+        self.reRecogButton.setDefaultAction(reRec)
 
         #  ================== Zoom layout ==================
         zoomLayout = QHBoxLayout()
@@ -967,7 +1038,8 @@ class MainWindow(QMainWindow):
 
         # Store actions for further handling.
         self.actions = struct(
-            save=save,
+            check_0=check_0,
+            check_1=check_1,
             resetAll=resetAll,
             deleteImg=deleteImg,
             lineColor=color1,
@@ -977,7 +1049,7 @@ class MainWindow(QMainWindow):
             delete=delete,
             edit=edit,
             copy=copy,
-            saveRec=saveRec,
+            # saveRec=saveRec,
             singleRere=singleRere,
             AutoRec=AutoRec,
             reRec=reRec,
@@ -993,8 +1065,8 @@ class MainWindow(QMainWindow):
             fitWindow=fitWindow,
             fitWidth=fitWidth,
             zoomActions=zoomActions,
-            saveLabel=saveLabel,
-            change_cls=change_cls,
+            saveLabel_0=saveLabel_0,
+            saveLabel_1=saveLabel_1,
             undo=undo,
             undoLastPoint=undoLastPoint,
             # open_dataset_dir=open_dataset_dir,
@@ -1003,10 +1075,10 @@ class MainWindow(QMainWindow):
             lock=lock,
             # exportJSON=exportJSON,
             fileMenuActions=(
-                opendir,
-                # open_dataset_dir,
-                saveLabel,
-                # exportJSON,
+                openDir_0,
+                saveLabel_0,
+                openDir_1,
+                saveLabel_1,
                 resetAll,
                 quit,
             ),
@@ -1029,12 +1101,10 @@ class MainWindow(QMainWindow):
                 color1,
                 self.drawSquaresOption,
                 lock,
-                None,
-                change_cls,
             ),
             beginnerContext=(
                 create,
-                createpoly,
+                # createpoly,
                 edit,
                 copy,
                 delete,
@@ -1043,7 +1113,6 @@ class MainWindow(QMainWindow):
                 rotateLeft,
                 rotateRight,
                 lock,
-                change_cls,
             ),
             advancedContext=(
                 createMode,
@@ -1099,13 +1168,11 @@ class MainWindow(QMainWindow):
         addActions(
             self.menus.file,
             (
-                opendir,
-                # open_dataset_dir,
+                openDir_0,
+                saveLabel_0,
                 None,
-                saveLabel,
-                saveRec,
-                # exportJSON,
-                self.autoSaveOption,
+                openDir_1,
+                saveLabel_1,
                 None,
                 resetAll,
                 deleteImg,
@@ -1146,7 +1213,7 @@ class MainWindow(QMainWindow):
         # Application state.
         self.image = QImage()
         self.filePath = ustr(default_filename)
-        self.lastOpenDir = None
+        self.lastOpenDir = [None, None]
         self.recentFiles = []
         self.maxRecent = 7
         self.lineColor = None
@@ -1155,6 +1222,14 @@ class MainWindow(QMainWindow):
         self.fit_window = False
         # Add Chris
         self.difficult = False
+
+        # ==== new =====
+        self.PPlabelpath = ["", ""]
+        self.PPlabel = [{}, {}]  # 每个字典里时(file:label)对
+        self.fileStatepath = ["", ""]
+        self.fileStatedict = [{}, {}]
+        self.Cachelabelpath = None  # 仅对于recognition文件列表
+        self.Cachelabel = {}
 
         # Fix the compatible issue for qt4 and qt5. Convert the QStringList to python list
         if settings.get(SETTING_RECENT_FILES):
@@ -1177,8 +1252,9 @@ class MainWindow(QMainWindow):
                 break
         self.resize(size)
         self.move(position)
-        saveDir = ustr(settings.get(SETTING_SAVE_DIR, None))
-        self.lastOpenDir = ustr(settings.get(SETTING_LAST_OPEN_DIR, None))
+        # saveDir = ustr(settings.get(SETTING_SAVE_DIR, None))
+        self.lastOpenDir[0] = ustr(settings.get(SETTING_LAST_OPEN_DIR_0, None))
+        self.lastOpenDir[1] = ustr(settings.get(SETTING_LAST_OPEN_DIR_1, None))
 
         self.restoreState(settings.get(SETTING_WIN_STATE, QByteArray()))
         Shape.line_color = self.lineColor = QColor(
@@ -1195,6 +1271,7 @@ class MainWindow(QMainWindow):
         # Populate the File menu dynamically.
         self.updateFileMenu()
 
+        # TODO
         # Since loading the file may take some time, make sure it runs in the background.
         if self.filePath and os.path.isdir(self.filePath):
             self.queueEvent(partial(self.importDirImages, self.filePath or ""))
@@ -1243,15 +1320,16 @@ class MainWindow(QMainWindow):
         )  # if self.beginner() else (self.actions.createMode, self.actions.editMode)
         addActions(self.menus.edit, actions + self.actions.editMenu)
 
-    def setDirty(self):
-        self.dirty = True
-        self.actions.save.setEnabled(True)
+    def setDirty(self, mode=0):
+        self.dirty[mode] = True
+        action_check = self.actions.check_0 if mode == 0 else self.actions.check_1
+        action_check.setEnabled(True)
 
-    def setClean(self):
-        self.dirty = False
-        self.actions.save.setEnabled(False)
-        self.actions.create.setEnabled(True)
-        self.actions.createpoly.setEnabled(True)
+    def setClean(self, mode=0):
+        self.dirty[mode] = False
+        action_check = self.actions.check_0 if mode == 0 else self.actions.check_1
+        action_check.setEnabled(False)
+        self.actions.create.setEnabled(True)  # TODO
 
     def toggleActions(self, value=True):
         """Enable/Disable widgets which depend on an opened image."""
@@ -1266,35 +1344,31 @@ class MainWindow(QMainWindow):
     def status(self, message, delay=5000):
         self.statusBar().showMessage(message, delay)
 
-    def resetState(self):
+    def resetState(self, mode=0):
+        # TODO 区分？
         self.itemsToShapes.clear()
         self.shapesToItems.clear()
-        self.itemsToShapesbox.clear()  # ADD
-        self.shapesToItemsbox.clear()
-        # self.labelList.clear()
-        # self.BoxList.clear()
-        # self.indexList.clear()
-        self.templateLabelList.clear()
-        self.templateIndexList.clear()
-        self.recogIndexList.clear()
-        self.recogLableList.clear()
-        self.recogContentList.clear()
+
+        if mode == 0:
+            self.templateLabelList.clear()
+            self.templateIndexList.clear()
+        elif mode == 1:
+            self.recogIndexList.clear()
+            self.recogLabelList.clear()
+            self.recogContentList.clear()
         self.filePath = None
         self.imageData = None
-        self.labelFile = None
+        # self.labelFile = None
         self.canvas.resetState()
         self.labelCoordinates.clear()
         # self.comboBox.cb.clear()
         self.result_dic = []
 
+    # 当前展示图像 当前选中项
     def currentItem(self):
-        items = self.labelList.selectedItems()
-        if items:
-            return items[0]
-        return None
-
-    def currentBox(self):
-        items = self.BoxList.selectedItems()
+        mode = self.showMode
+        labelList = self.templateLabelList if mode == 0 else self.recogLabelList
+        items = labelList.selectedItems()
         if items:
             return items[0]
         return None
@@ -1377,15 +1451,16 @@ class MainWindow(QMainWindow):
                 "It is recommended to clear the label box and rotate it.",
             )
 
-    def rotateImgAction(self, k=1, _value=False):
-        filename = self.mImgList[self.currIndex]
+    def rotateImgAction(self, k=1, _value=False, mode=0):
+        mode = self.showMode
+        filename = self.mImgList[mode][self.currIndex[mode]]
 
         if os.path.exists(filename):
             if self.itemsToShapesbox:
                 self.rotateImgWarn()
             else:
-                self.saveFile()
-                self.dirty = False
+                self.saveFile(mode)  # TODO mode是用当前状态？
+                self.dirty[mode] = False
                 self.rotateImg(filename=filename, k=k, _value=True)
         else:
             self.rotateImgWarn()
@@ -1435,177 +1510,80 @@ class MainWindow(QMainWindow):
     def popLabelListMenu(self, point):
         self.menus.labelList.exec_(self.labelList.mapToGlobal(point))
 
+    # TODO
     def editLabel(self):
         if not self.canvas.editing():
             return
         item = self.currentItem()
         if not item:
             return
-        text = self.labelDialog.popUp(item.text())
+        text, is_mark, content = self.labelDialog.popUp(item.text())
+        # TODO 如何更新content列表？
         if text is not None:
             item.setText(text)
             # item.setBackground(generateColorByText(text))
-            self.setDirty()
+            self.setDirty(self.showMode)
             self.updateComboBox()
 
-    # =================== detection box related functions ===================
-    def boxItemChanged(self, item):
-        shape = self.itemsToShapesbox[item]
-
-        box = ast.literal_eval(item.text())
-        # print('shape in labelItemChanged is',shape.points)
-        if box != [(int(p.x()), int(p.y())) for p in shape.points]:
-            # shape.points = box
-            shape.points = [QPointF(p[0], p[1]) for p in box]
-
-            # QPointF(x,y)
-            # shape.line_color = generateColorByText(shape.label)
-            self.setDirty()
-        else:  # User probably changed item visibility
-            self.canvas.setShapeVisible(shape, True)  # item.checkState() == Qt.Checked
-
-    def editBox(self):  # ADD
-        if not self.canvas.editing():
-            return
-        item = self.currentBox()
-        if not item:
-            return
-        text = self.labelDialog.popUp(item.text())
-
-        imageSize = str(self.image.size())
-        width, height = self.image.width(), self.image.height()
-        if text:
-            try:
-                text_list = eval(text)
-            except:
-                msg_box = QMessageBox(
-                    QMessageBox.Warning, "Warning", "Please enter the correct format"
-                )
-                msg_box.exec_()
-                return
-            if len(text_list) < 4:
-                msg_box = QMessageBox(
-                    QMessageBox.Warning,
-                    "Warning",
-                    "Please enter the coordinates of 4 points",
-                )
-                msg_box.exec_()
-                return
-            for box in text_list:
-                if box[0] > width or box[0] < 0 or box[1] > height or box[1] < 0:
-                    msg_box = QMessageBox(
-                        QMessageBox.Warning, "Warning", "Out of picture size"
-                    )
-                    msg_box.exec_()
-                    return
-
-            item.setText(text)
-            # item.setBackground(generateColorByText(text))
-            self.setDirty()
-            self.updateComboBox()
-
-    def updateBoxlist(self):
-        self.canvas.selectedShapes_hShape = []
-        if self.canvas.hShape != None:
-            self.canvas.selectedShapes_hShape = self.canvas.selectedShapes + [
-                self.canvas.hShape
-            ]
-        else:
-            self.canvas.selectedShapes_hShape = self.canvas.selectedShapes
-        for shape in self.canvas.selectedShapes_hShape:
-            if shape in self.shapesToItemsbox.keys():
-                item = self.shapesToItemsbox[shape]  # listitem
-                text = [(int(p.x()), int(p.y())) for p in shape.points]
-                item.setText(str(text))
-        self.actions.undo.setEnabled(True)
-        self.setDirty()
-
-    def indexTo5Files(self, currIndex):
+    # 返回值给self.mImgList5，表示thumbnail显示的5张图片
+    def indexTo5Files(self, currIndex, mode=0):
         if currIndex < 2:
-            return self.mImgList[:5]
-        elif currIndex > len(self.mImgList) - 3:
-            return self.mImgList[-5:]
+            return self.mImgList[mode][:5]
+        elif currIndex > len(self.mImgList[mode]) - 3:
+            return self.mImgList[mode][-5:]
         else:
-            return self.mImgList[currIndex - 2 : currIndex + 3]
+            return self.mImgList[mode][currIndex - 2 : currIndex + 3]
 
-    # Tzutalin 20160906 : Add file list and dock to move faster
-    def fileitemDoubleClicked(self, item=None):
-        self.currIndex = self.mImgList.index(
-            ustr(os.path.join(os.path.abspath(self.dirname), item.text()))
+    def fileitemDoubleClicked(self, item=None, mode=0):
+        self.currIndex[mode] = self.mImgList[mode].index(
+            ustr(os.path.join(os.path.abspath(self.dirname[mode]), item.text()))
         )
-        filename = self.mImgList[self.currIndex]
+        filename = self.mImgList[mode][self.currIndex[mode]]
         if filename:
-            self.mImgList5 = self.indexTo5Files(self.currIndex)
-            # self.additems5(None)
-            self.loadFile(filename)
+            self.mImgList5 = self.indexTo5Files(self.currIndex[mode], mode=mode)
+            self.loadFile(filename, mode)
 
-    def iconitemDoubleClicked(self, item=None):
-        self.currIndex = self.mImgList.index(ustr(os.path.join(item.toolTip())))
-        filename = self.mImgList[self.currIndex]
+    # new
+    def iconitemDoubleClicked(self, item=None, mode=0):
+        self.currIndex[mode] = self.mImgList[mode].index(
+            ustr(os.path.join(item.toolTip()))
+        )
+        filename = self.mImgList[mode][self.currIndex[mode]]
         if filename:
-            self.mImgList5 = self.indexTo5Files(self.currIndex)
+            self.mImgList5 = self.indexTo5Files(self.currIndex[mode], mode)
             # self.additems5(None)
             self.loadFile(filename)
 
     def CanvasSizeChange(self):
-        if len(self.mImgList) > 0 and self.imageSlider.hasFocus():
+        mode = self.showMode
+        if len(self.mImgList[mode]) > 0 and self.imageSlider.hasFocus():
             self.zoomWidget.setValue(self.imageSlider.value())
 
     def shapeSelectionChanged(self, selected_shapes):
+        mode = self.showMode
+        print(f"in shapeSelectionChanged(), current mode: {mode}")
         self._noSelectionSlot = True
         for shape in self.canvas.selectedShapes:
             shape.selected = False
-        # TODO 判断是哪种模式
-        # self.labelList.clearSelection()
-        # self.indexList.clearSelection()
-        self.templateIndexList.clearSelection()
-        self.templateLabelList.clearSelection()
+
+        indexList = self.templateIndexList if mode == 0 else self.recogIndexList
+        labelList = self.templateLabelList if mode == 0 else self.recogLabelList
+
+        indexList.clearSelection()
+        labelList.clearSelection()
         self.canvas.selectedShapes = selected_shapes
+
         for shape in self.canvas.selectedShapes:
             shape.selected = True
             self.shapesToItems[shape].setSelected(True)
-            self.shapesToItemsbox[shape].setSelected(True)
-            # index = self.labelList.indexFromItem(self.shapesToItems[shape]).row()
-            index = self.templateLabelList.indexFromItem(
-                self.shapesToItems[shape]
-            ).row()
-            self.templateIndexList.item(index).setSelected(True)
+            index = labelList.indexFromItem(self.shapesToItems[shape]).row()
+            indexList.item(index).setSelected(True)
 
-        """
-        self.labelList.scrollToItem(
-            self.currentItem()
-        )  # QAbstractItemView.EnsureVisible
+        labelList.scrollToItem(self.currentItem())  # QAbstractItemView.EnsureVisible
         # map current label item to index item and select it
-        index = self.labelList.indexFromItem(self.currentItem()).row()
-        self.indexList.scrollToItem(self.indexList.item(index))
-        self.BoxList.scrollToItem(self.currentBox())
-        """
-        self.templateLabelList.scrollToItem(
-            self.currentItem()
-        )  # QAbstractItemView.EnsureVisible
-        # map current label item to index item and select it
-        index = self.templateLabelList.indexFromItem(self.currentItem()).row()
-        self.templateIndexList.scrollToItem(self.indexList.item(index))
-
-        # if self.kie_mode:
-        #     if len(self.canvas.selectedShapes) == 1 and self.keyList.count() > 0:
-        #         selected_key_item_row = self.keyList.findItemsByLabel(
-        #             self.canvas.selectedShapes[0].key_cls, get_row=True
-        #         )
-        #         if (
-        #             isinstance(selected_key_item_row, list)
-        #             and len(selected_key_item_row) == 0
-        #         ):
-        #             key_text = self.canvas.selectedShapes[0].key_cls
-        #             item = self.keyList.createItemFromLabel(key_text)
-        #             self.keyList.addItem(item)
-        #             rgb = self._get_rgb_by_label(key_text, self.kie_mode)
-        #             self.keyList.setItemLabel(item, key_text, rgb)
-        #             selected_key_item_row = self.keyList.findItemsByLabel(
-        #                 self.canvas.selectedShapes[0].key_cls, get_row=True
-        #             )
-
-        #         self.keyList.setCurrentRow(selected_key_item_row)
+        index = labelList.indexFromItem(self.currentItem()).row()
+        indexList.scrollToItem(indexList.item(index))
+        # TODO
 
         self._noSelectionSlot = False
         n_selected = len(selected_shapes)
@@ -1615,13 +1593,13 @@ class MainWindow(QMainWindow):
         self.actions.copy.setEnabled(n_selected)
         self.actions.edit.setEnabled(n_selected == 1)
         self.actions.lock.setEnabled(n_selected)
-        self.actions.change_cls.setEnabled(n_selected)
 
-    def addLabel(self, shape):
+    def addLabel(self, shape, mode=0):
         shape.paintLabel = self.displayLabelOption.isChecked()
         shape.paintIdx = self.displayIndexOption.isChecked()
 
-        item = HashableQListWidgetItem(shape.label)
+        # 建立item（label）到shape的双向字典关系
+        item = HashableQListWidgetItem(shape.label)  # 使其可以作为字典的键值
         # current difficult checkbox is disenble
         # item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         # item.setCheckState(Qt.Unchecked) if shape.difficult else item.setCheckState(Qt.Checked)
@@ -1630,42 +1608,34 @@ class MainWindow(QMainWindow):
         # item.setBackground(generateColorByText(shape.label))
         self.itemsToShapes[item] = shape
         self.shapesToItems[shape] = item
-        # add current label item index before label string
-        current_index = QListWidgetItem(str(self.labelList.count()))
-        current_index.setTextAlignment(Qt.AlignHCenter)
-        # TODO
-        """
-        self.indexList.addItem(current_index)
-        self.labelList.addItem(item)
-        """
-        self.templateIndexList.addItem(current_index)
-        self.templateLabelList.addItem(item)
-        # print('item in add label is ',[(p.x(), p.y()) for p in shape.points], shape.label)
 
-        # ADD for box
-        item = HashableQListWidgetItem(
-            str([(int(p.x()), int(p.y())) for p in shape.points])
+        indexList = self.templateIndexList if mode == 0 else self.recogIndexList
+        labelList = self.templateLabelList if mode == 0 else self.recogLabelList
+        labelListDock = (
+            self.templateLabelListDock if mode == 0 else self.recogLabelListDock
         )
-        self.itemsToShapesbox[item] = shape
-        self.shapesToItemsbox[shape] = item
-        """
-        self.BoxList.addItem(item)
-        """
+        current_index = QListWidgetItem(str(labelList.count()))
+        current_index.setTextAlignment(Qt.AlignHCenter)
+        indexList.addItem(current_index)
+
+        labelList.addItem(item)
+
+        if mode == 1:
+            content_item = HashableQListWidgetItem(shape.content)
+            self.recogContentList.addItem(content_item)
+
         for action in self.actions.onShapesPresent:
             action.setEnabled(True)
-        self.updateComboBox()
+        # self.updateComboBox()
 
-        # counting 不要也行
-        """
         # update show counting
-        self.BoxListDock.setWindowTitle(
-            self.BoxListDockName + f" ({self.BoxList.count()})"
-        )
-        self.labelListDock.setWindowTitle(
-            self.labelListDockName + f" ({self.labelList.count()})"
-        )
-        """
+        labelListDock.setWindowTitle("Label" + f" ({labelList.count()})")
 
+    def modeChanged(self):
+        self.operateMode = self.modeButtonGroup.checkedId()
+        print("current oprateMode is ", self.operateMode)
+
+    # TODO
     def remLabels(self, shapes):
         if shapes is None:
             # print('rm empty label')
@@ -1677,30 +1647,24 @@ class MainWindow(QMainWindow):
             del self.itemsToShapes[item]
             self.updateComboBox()
 
-            # ADD:
-            item = self.shapesToItemsbox[shape]
-            self.BoxList.takeItem(self.BoxList.row(item))
-            del self.shapesToItemsbox[shape]
-            del self.itemsToShapesbox[item]
-            self.updateComboBox()
         self.updateIndexList()
 
     def loadLabels(self, shapes):
         s = []
         shape_index = 0
-        for title, is_mark, label, points, line_color, key_cls, difficult in shapes:
+        mode = self.showMode
+        for label, is_mark, content, points, line_color, difficult in shapes:
             shape = Shape(
-                title="test_title",
-                is_mark=is_mark,
                 label=label,
+                is_mark=is_mark,
+                content=content,
                 line_color=line_color,
-                key_cls=key_cls,
             )
             for x, y in points:
                 # Ensure the labels are within the bounds of the image. If not, fix them.
                 x, y, snapped = self.canvas.snapPointToCanvas(x, y)
                 if snapped:
-                    self.setDirty()
+                    self.setDirty(mode)
 
                 shape.addPoint(QPointF(x, y))
             shape.difficult = difficult
@@ -1711,9 +1675,9 @@ class MainWindow(QMainWindow):
             s.append(shape)
 
             self._update_shape_color(shape)
-            self.addLabel(shape)
+            self.addLabel(shape, mode)
 
-        self.updateComboBox()
+        # self.updateComboBox()
         self.canvas.loadShapes(s)
 
     def singleLabel(self, shape):
@@ -1722,11 +1686,6 @@ class MainWindow(QMainWindow):
             return
         item = self.shapesToItems[shape]
         item.setText(shape.label)
-        self.updateComboBox()
-
-        # ADD:
-        item = self.shapesToItemsbox[shape]
-        item.setText(str([(int(p.x()), int(p.y())) for p in shape.points]))
         self.updateComboBox()
 
     def updateComboBox(self):
@@ -1745,32 +1704,31 @@ class MainWindow(QMainWindow):
         # self.comboBox.update_items(uniqueTextList)
         """
 
+    # TODO
     def updateIndexList(self):
-        # TODO
         self.templateIndexList.clear()
         for i in range(self.templateLabelList.count()):
             string = QListWidgetItem(str(i))
             string.setTextAlignment(Qt.AlignHCenter)
             self.templateIndexList.addItem(string)
 
-    def saveLabels(self, annotationFilePath, mode="Auto"):
+    def saveLabels(self, annotationFilePath, mode_="Auto", mode=0):
         # Mode is Auto means that labels will be loaded from self.result_dic totally, which is the output of ocr model
         annotationFilePath = ustr(annotationFilePath)  # 转换为 Unicode 字符串
 
         def format_shape(s):
             print("s in saveLabels is ", s)
             return dict(
-                title=s.title,  # str
-                is_mark=s.is_mark,  # bool
                 label=s.label,  # str
+                is_mark=s.is_mark,  # bool
+                content=s.content,  # str
                 line_color=s.line_color.getRgb(),
                 fill_color=s.fill_color.getRgb(),
                 points=[(int(p.x()), int(p.y())) for p in s.points],  # QPonitF
                 difficult=s.difficult,
-                key_cls=s.key_cls,
             )  # bool
 
-        if mode == "Auto":
+        if mode_ == "Auto":
             shapes = []
         else:
             shapes = [
@@ -1782,18 +1740,13 @@ class MainWindow(QMainWindow):
         for box in self.result_dic:  # todo: 需要修改result_dic内数据, 添加新的项并修改位置
             # trans_dic = {"label": box[1][0], "points": box[0], "difficult": False}
             trans_dic = {
-                "title": box[1],
+                "label": box[1],
                 "is_mark": box[2],
-                "label": box[3][0],
+                "content": box[3][0],
                 "points": box[0],
                 "difficult": False,
             }
-            # if self.kie_mode:
-            #     if len(box) == 3:
-            #         trans_dic.update({"key_cls": box[2]})
-            #     else:
-            #         trans_dic.update({"key_cls": "None"})
-            if trans_dic["label"] == "" and mode == "Auto":
+            if trans_dic["content"] == "" and mode_ == "Auto":  # TODO
                 continue
             shapes.append(trans_dic)
 
@@ -1801,17 +1754,15 @@ class MainWindow(QMainWindow):
             trans_dic = []
             for box in shapes:
                 trans_dict = {
-                    "title": box["title"],
+                    "label": box["label"],
                     "is_mark": box["is_mark"],
-                    "transcription": box["label"],
+                    "content": box["content"],
                     "points": box["points"],
                     "difficult": box["difficult"],
                 }
-                # if self.kie_mode:
-                #     trans_dict.update({"key_cls": box["key_cls"]})
                 trans_dic.append(trans_dict)
-            self.PPlabel[annotationFilePath] = trans_dic
-            if mode == "Auto":
+            self.PPlabel[mode][annotationFilePath] = trans_dic
+            if mode_ == "Auto":
                 self.Cachelabel[annotationFilePath] = trans_dic
 
             # else:
@@ -1825,56 +1776,33 @@ class MainWindow(QMainWindow):
 
     def copySelectedShape(self):
         for shape in self.canvas.copySelectedShape():
-            self.addLabel(shape)
+            self.addLabel(shape, self.showMode)
         # fix copy and delete
         # self.shapeSelectionChanged(True)
 
-    def move_scrollbar(self, value):
-        # TODO 需要判断是哪个列表，设置相应的值
-        """
-        self.labelListBar.setValue(value)
-        self.indexListBar.setValue(value)
-        """
-        self.templateLabelListBar.setValue(value)
-        self.templateIndexListBar.setValue(value)
+    def move_scrollbar(self, value, mode=0):
+        if mode == 0:
+            self.templateLabelListBar.setValue(value)
+            self.templateIndexListBar.setValue(value)
+        elif mode == 1:
+            self.recogIndexListBar.setValue(value)
+            self.recogLabelListBar.setValue(value)
+            self.recogContentListBar.setValue(value)
 
     def contentSelectionChanged(self):
         pass
 
-    def labelSelectionChanged(self):
+    def labelSelectionChanged(self, mode=0):
+        # 只能操作当前展示图片的label list
+        mode = self.showMode
         if self._noSelectionSlot:
             return
         if self.canvas.editing():
             selected_shapes = []
-            # TODO 需要判断是哪个列表，读取对应列表的item
-            """
-            for item in self.labelList.selectedItems():
-                selected_shapes.append(self.itemsToShapes[item])
-            """
-            for item in self.templateLabelList.selectedItems():
-                selected_shapes.append(self.itemsToShapes[item])
-            if selected_shapes:
-                self.canvas.selectShapes(selected_shapes)
-            else:
-                self.canvas.deSelectShape()
+            labelList = self.templateLabelList if mode == 0 else self.recogLabelList
 
-    def indexSelectionChanged(self):
-        if self._noSelectionSlot:
-            return
-        if self.canvas.editing():
-            selected_shapes = []
-            # TODO 需要判断是哪个列表，读取对应列表的item
-            """
-            for item in self.indexList.selectedItems():
-                # map index item to label item
-                index = self.indexList.indexFromItem(item).row()
-                item = self.labelList.item(index)
-                selected_shapes.append(self.itemsToShapes[item])
-            """
-            for item in self.templateIndexList.selectedItems():
-                # map index item to label item
-                index = self.templateIndexList.indexFromItem(item).row()
-                item = self.templateLabelList.item(index)
+            for item in labelList.selectedItems():
+                # TODO 区分 self.itemsToShapes
                 selected_shapes.append(self.itemsToShapes[item])
 
             if selected_shapes:
@@ -1882,15 +1810,22 @@ class MainWindow(QMainWindow):
             else:
                 self.canvas.deSelectShape()
 
-    # TODO  delete
-    def boxSelectionChanged(self):
+    def indexSelectionChanged(self, mode=0):
+        # 只能操作当前展示图片的label list
+        mode = self.showMode
         if self._noSelectionSlot:
-            # self.BoxList.scrollToItem(self.currentBox(), QAbstractItemView.PositionAtCenter)
             return
         if self.canvas.editing():
             selected_shapes = []
-            for item in self.BoxList.selectedItems():
-                selected_shapes.append(self.itemsToShapesbox[item])
+            indexList = self.templateIndexList if mode == 0 else self.recogIndexList
+            labelList = self.templateLabelList if mode == 0 else self.recogLabelList
+
+            for item in indexList.selectedItems():
+                # map index item to label item
+                index = indexList.indexFromItem(item).row()
+                item = labelList.item(index)
+                selected_shapes.append(self.itemsToShapes[item])
+
             if selected_shapes:
                 self.canvas.selectShapes(selected_shapes)
             else:
@@ -1899,7 +1834,7 @@ class MainWindow(QMainWindow):
     def contentItemChanged(self, item):
         pass
 
-    def labelItemChanged(self, item):
+    def labelItemChanged(self, item, mode=0):
         # avoid accidentally triggering the itemChanged siganl with unhashable item
         # Unknown trigger condition
         if type(item) == HashableQListWidgetItem:
@@ -1908,10 +1843,10 @@ class MainWindow(QMainWindow):
             if label != shape.label:
                 shape.label = item.text()
                 # shape.line_color = generateColorByText(shape.label)
-                self.setDirty()
+                self.setDirty(mode)
             elif not ((item.checkState() == Qt.Unchecked) ^ (not shape.difficult)):
                 shape.difficult = True if item.checkState() == Qt.Unchecked else False
-                self.setDirty()
+                self.setDirty(mode)
             else:  # User probably changed item visibility
                 self.canvas.setShapeVisible(
                     shape, True
@@ -1922,7 +1857,8 @@ class MainWindow(QMainWindow):
                 "enter labelItemChanged slot with unhashable item: ", item, item.text()
             )
 
-    def drag_drop_happened(self):
+    # TODO
+    def drag_drop_happened(self, mode=0):
         """
         label list drag drop signal slot
         """
@@ -1953,19 +1889,23 @@ class MainWindow(QMainWindow):
         """
 
         # changes happen
-        self.setDirty()
+        self.setDirty(mode)
 
+    # TODO
     # Callback functions:
-    def newShape(self, value=True):
+    def newShape(self, value=True, mode=0):
         """Pop-up and give focus to the label editor.
 
         position MUST be in global coordinates.
         """
+        if mode == 0:  # 模版模式下，显示labelDialog
+            value = True
+
         if len(self.labelHist) > 0:
             self.labelDialog = LabelDialog(parent=self, listItem=self.labelHist)
 
         if value:
-            text = self.labelDialog.popUp(text=self.prevLabelText)
+            text, is_mark, content = self.labelDialog.popUp(text=self.prevLabelText)
             self.lastLabel = text
         else:
             text = self.prevLabelText
@@ -1974,43 +1914,26 @@ class MainWindow(QMainWindow):
             self.prevLabelText = self.stringBundle.getString("tempLabel")
 
             shape = self.canvas.setLastLabel(
-                text, None, None, None
+                text, is_mark, content, None, None
             )  # generate_color, generate_color
-            """
-            if self.kie_mode:
-                key_text, _ = self.keyDialog.popUp(self.key_previous_text)
-                if key_text is not None:
-                    shape = self.canvas.setLastLabel(
-                        text, None, None, key_text
-                    )  # generate_color, generate_color
-                    self.key_previous_text = key_text
-                    if not self.keyList.findItemsByLabel(key_text):
-                        item = self.keyList.createItemFromLabel(key_text)
-                        self.keyList.addItem(item)
-                        rgb = self._get_rgb_by_label(key_text, self.kie_mode)
-                        self.keyList.setItemLabel(item, key_text, rgb)
 
-                    self._update_shape_color(shape)
-                    self.keyDialog.addLabelHistory(key_text)
-            """
-
-            self.addLabel(shape)
+            self.addLabel(shape, self.showMode)
             if self.beginner():  # Switch to edit mode.
                 self.canvas.setEditing(True)
                 self.actions.create.setEnabled(True)
-                self.actions.createpoly.setEnabled(True)
                 self.actions.undoLastPoint.setEnabled(False)
                 self.actions.undo.setEnabled(True)
             else:
                 self.actions.editMode.setEnabled(True)
-            self.setDirty()
+            self.setDirty(mode)
 
         else:
             # self.canvas.undoLastLine()
             self.canvas.resetAllLines()
 
     def _update_shape_color(self, shape):
-        r, g, b = self._get_rgb_by_label(shape.key_cls, self.kie_mode)
+        # r, g, b = self._get_rgb_by_label(shape.key_cls, self.kie_mode)
+        r, g, b = (0, 255, 0)
         shape.line_color = QColor(r, g, b)
         shape.vertex_fill_color = QColor(r, g, b)
         shape.hvertex_fill_color = QColor(255, 255, 255)
@@ -2018,15 +1941,16 @@ class MainWindow(QMainWindow):
         shape.select_line_color = QColor(255, 255, 255)
         shape.select_fill_color = QColor(r, g, b, 155)
 
-    def _get_rgb_by_label(self, label, kie_mode):
-        shift_auto_shape_color = 2  # use for random color
-        if kie_mode and label != "None":
-            item = self.keyList.findItemsByLabel(label)[0]
-            label_id = self.keyList.indexFromItem(item).row() + 1
-            label_id += shift_auto_shape_color
-            return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
-        else:
-            return (0, 255, 0)
+    # def _get_rgb_by_label(self, label):
+    #     # shift_auto_shape_color = 2  # use for random color
+    #     # if kie_mode and label != "None":
+    #     #     item = self.keyList.findItemsByLabel(label)[0]
+    #     #     label_id = self.keyList.indexFromItem(item).row() + 1
+    #     #     label_id += shift_auto_shape_color
+    #     #     return LABEL_COLORMAP[label_id % len(LABEL_COLORMAP)]
+    #     # else:
+    #     #     return (0, 255, 0)
+    #     return (0, 255, 0)
 
     def scrollRequest(self, delta, orientation):
         units = -delta / (8 * 15)
@@ -2113,11 +2037,13 @@ class MainWindow(QMainWindow):
         for item, shape in self.itemsToShapes.items():
             self.canvas.setShapeVisible(shape, value)
 
-    def loadFile(self, filePath=None):
+    # new 区分mode
+    # load具体的一个文件
+    def loadFile(self, filePath=None, mode=0):
         """Load the specified file, or the last opened file if None."""
-        if self.dirty:
-            self.mayContinue()
-        self.resetState()
+        if self.dirty[self.showMode]:
+            self.mayContinue(self.showMode)
+        self.resetState(mode)
         self.canvas.setEnabled(False)
         if filePath is None:
             filePath = self.settings.get(SETTING_FILENAME)
@@ -2130,15 +2056,29 @@ class MainWindow(QMainWindow):
         # Tzutalin 20160906 : Add file list and dock to move faster
         # Highlight the file item
 
+        # 判断处理哪个列表
+        fileListWidget = (
+            self.templateFileListWidget if mode == 0 else self.recogFileListWidget
+        )
+        fileListDock = (
+            self.templateFileListDock if mode == 0 else self.recogFileListDock
+        )
+        fileListName = (
+            self.templateFileListName if mode == 0 else self.recogFileListName
+        )
+        labelList = self.templateLabelList if mode == 0 else self.recogLabelList
+        indexList = self.templateIndexList if mode == 0 else self.recogIndexList
+        action_check = self.actions.check_0 if mode == 0 else self.actions.check_1
+
         # File List and Dock Handling
-        if unicodeFilePath and self.templateFileListWidget.count() > 0:
-            if unicodeFilePath in self.mImgList:
-                index = self.mImgList.index(unicodeFilePath)
-                fileWidgetItem = self.templateFileListWidget.item(index)
+        if unicodeFilePath and fileListWidget.count() > 0:  # 当前存在列表
+            if unicodeFilePath in self.mImgList[mode]:  # 文件在当前列表中，选中当前文件
+                index = self.mImgList[mode].index(unicodeFilePath)  # 当前文件在mImgList中的索引
+                fileWidgetItem = fileListWidget.item(index)  # 在ListWidget中的item
                 print("unicodeFilePath is", unicodeFilePath)
                 fileWidgetItem.setSelected(True)
-                self.iconlist.clear()
-                self.additems5(None)
+                self.iconlist.clear()  # 清除thumbnail
+                self.additems5(None)  # 更新thumbnail
 
                 for i in range(5):
                     item_tooltip = self.iconlist.item(i).toolTip()
@@ -2146,11 +2086,11 @@ class MainWindow(QMainWindow):
                     if item_tooltip == ustr(filePath):
                         titem = self.iconlist.item(i)
                         titem.setSelected(True)
-                        self.iconlist.scrollToItem(titem)
+                        self.iconlist.scrollToItem(titem)  # iconlist中的选中情况
                         break
-            else:
-                self.templateFileListWidget.clear()
-                self.mImgList.clear()
+            else:  # 文件不在当前列表中，清空当前列表（后续需要加载新的列表）
+                fileListWidget.clear()
+                self.mImgList[mode].clear()
                 self.iconlist.clear()
 
         # if unicodeFilePath and self.iconList.count() > 0:
@@ -2158,6 +2098,8 @@ class MainWindow(QMainWindow):
 
         # Image Loading and Display
         if unicodeFilePath and os.path.exists(unicodeFilePath):
+            self.showMode = mode  # new 加载显示当前图像时改变当前showMode
+
             self.canvas.verified = False
             cvimg = cv2.imdecode(np.fromfile(unicodeFilePath, dtype=np.uint8), 1)
             height, width, depth = cvimg.shape
@@ -2178,94 +2120,91 @@ class MainWindow(QMainWindow):
             self.filePath = unicodeFilePath
             self.canvas.loadPixmap(QPixmap.fromImage(image))
 
-            if self.validFilestate(filePath) is True:
-                self.setClean()
+            if self.validFilestate(filePath, mode) is True:
+                self.setClean()  # TODO
             else:
-                self.dirty = False
-                self.actions.save.setEnabled(True)
+                self.dirty[mode] = False
+                action_check.setEnabled(True)
             if len(self.canvas.lockedShapes) != 0:
-                self.actions.save.setEnabled(True)
-                self.setDirty()
+                action_check.setEnabled(True)
+                self.setDirty(mode)
             self.canvas.setEnabled(True)
             self.adjustScale(initial=True)
             self.paintCanvas()
             self.addRecentFile(self.filePath)
             self.toggleActions(True)
 
+            # 根据PPlabel字典，读取当前文件对应的label并显示shape TODO 需要区分
             self.showBoundingBoxFromPPlabel(filePath)
 
             self.setWindowTitle(__appname__ + " " + filePath)
 
+            # TODO
             # Default : select last item if there is at least one item
-            if self.labelList.count():
-                self.labelList.setCurrentItem(
-                    self.labelList.item(self.labelList.count() - 1)
-                )
-                self.labelList.item(self.labelList.count() - 1).setSelected(True)
-                self.indexList.item(self.labelList.count() - 1).setSelected(True)
+            if labelList.count():
+                labelList.setCurrentItem(labelList.item(labelList.count() - 1))
+                labelList.item(labelList.count() - 1).setSelected(True)
+                indexList.item(labelList.count() - 1).setSelected(True)
+                if mode == 1:
+                    self.recogContentList.item(labelList.count() - 1).setSelected(True)
 
             # show file list image count
-            select_indexes = self.templateFileListWidget.selectedIndexes()
+            select_indexes = fileListWidget.selectedIndexes()
             if len(select_indexes) > 0:
-                self.templateDock.setWindowTitle(
-                    self.templateFileListName + f" ({select_indexes[0].row() + 1}"
-                    f"/{self.templateFileListWidget.count()})"
+                fileListDock.setWindowTitle(
+                    fileListName + f" ({select_indexes[0].row() + 1}"
+                    f"/{fileListWidget.count()})"
                 )
-            # update show counting
-            self.BoxListDock.setWindowTitle(
-                self.BoxListDockName + f" ({self.BoxList.count()})"
-            )
-            self.labelListDock.setWindowTitle(
-                self.labelListDockName + f" ({self.labelList.count()})"
-            )
+            # # update show counting
+            # self.labelListDock.setWindowTitle(
+            #     self.labelListDockName + f" ({self.labelList.count()})"
+            # )
 
             self.canvas.setFocus(True)
             return True
         return False
 
+    # new
+    # 两个读取shape的途径，1）TODO self.canvas.lockedShapes 2）self.PPlabel
     def showBoundingBoxFromPPlabel(self, filePath):
+        mode = self.showMode
         width, height = self.image.width(), self.image.height()
-        imgidx = self.getImglabelidx(filePath)
+        imgidx = self.getImglabelidx(filePath)  # img filename
         shapes = []
         # box['ratio'] of the shapes saved in lockedShapes contains the ratio of the
         # four corner coordinates of the shapes to the height and width of the image
         for box in self.canvas.lockedShapes:
-            key_cls = "None" if not self.kie_mode else box["key_cls"]
             if self.canvas.isInTheSameImage:
                 shapes.append(
                     (
-                        box["title"],
+                        box["label"],
                         box["is_mark"],
-                        box["transcription"],
+                        box["content"],
                         [[s[0] * width, s[1] * height] for s in box["ratio"]],
                         DEFAULT_LOCK_COLOR,
-                        key_cls,
                         box["difficult"],
                     )
                 )
             else:
                 shapes.append(
                     (
-                        box["title"],
+                        box["label"],
                         box["is_mark"],
                         "锁定框：待检测",
                         [[s[0] * width, s[1] * height] for s in box["ratio"]],
                         DEFAULT_LOCK_COLOR,
-                        key_cls,
                         box["difficult"],
                     )
                 )
-        if imgidx in self.PPlabel.keys():
-            for box in self.PPlabel[imgidx]:
-                key_cls = "None" if not self.kie_mode else box.get("key_cls", "None")
+        if imgidx in self.PPlabel[mode].keys():
+            for box in self.PPlabel[mode][imgidx]:
                 shapes.append(
                     (
-                        box["title"],
+                        box["label"],
                         box["is_mark"],
-                        box["transcription"],
+                        box["content"],
                         box["points"],
                         None,
-                        key_cls,
                         box.get("difficult", False),
                     )
                 )
@@ -2274,10 +2213,10 @@ class MainWindow(QMainWindow):
             self.loadLabels(shapes)
             self.canvas.verified = False
 
-    def validFilestate(self, filePath):
-        if filePath not in self.fileStatedict.keys():
+    def validFilestate(self, filePath, mode=0):
+        if filePath not in self.fileStatedict[mode].keys():
             return None
-        elif self.fileStatedict[filePath] == 1:
+        elif self.fileStatedict[mode][filePath] == 1:
             return True
         else:
             return False
@@ -2337,22 +2276,34 @@ class MainWindow(QMainWindow):
             settings[SETTING_FILL_COLOR] = self.fillColor
             settings[SETTING_RECENT_FILES] = self.recentFiles
             settings[SETTING_ADVANCE_MODE] = not self._beginner
-            if self.defaultSaveDir and os.path.exists(self.defaultSaveDir):
-                settings[SETTING_SAVE_DIR] = ustr(self.defaultSaveDir)
-            else:
-                settings[SETTING_SAVE_DIR] = ""
+            # 存储状态 TODO
 
-            if self.lastOpenDir and os.path.exists(self.lastOpenDir):
-                settings[SETTING_LAST_OPEN_DIR] = self.lastOpenDir
+            # 0/1 分开存储
+            if self.defaultSaveDir[0] and os.path.exists(self.defaultSaveDir[0]):
+                settings[SETTING_SAVE_DIR_0] = ustr(self.defaultSaveDir[0])
             else:
-                settings[SETTING_LAST_OPEN_DIR] = ""
+                settings[SETTING_SAVE_DIR_0] = ""
+            if self.defaultSaveDir[1] and os.path.exists(self.defaultSaveDir[1]):
+                settings[SETTING_SAVE_DIR_1] = ustr(self.defaultSaveDir[1])
+            else:
+                settings[SETTING_SAVE_DIR_1] = ""
+
+            if self.lastOpenDir[0] and os.path.exists(self.lastOpenDir[0]):
+                settings[SETTING_LAST_OPEN_DIR_0] = self.lastOpenDir[0]
+            else:
+                settings[SETTING_LAST_OPEN_DIR_0] = ""
+            if self.lastOpenDir[1] and os.path.exists(self.lastOpenDir[1]):
+                settings[SETTING_LAST_OPEN_DIR_1] = self.lastOpenDir[1]
+            else:
+                settings[SETTING_LAST_OPEN_DIR_1] = ""
 
             settings[SETTING_PAINT_LABEL] = self.displayLabelOption.isChecked()
             settings[SETTING_PAINT_INDEX] = self.displayIndexOption.isChecked()
             settings[SETTING_DRAW_SQUARE] = self.drawSquaresOption.isChecked()
             settings.save()
             try:
-                self.saveLabelFile()
+                self.saveLabelFile(mode=0)
+                self.saveLabelFile(mode=1)
             except:
                 pass
 
@@ -2376,13 +2327,13 @@ class MainWindow(QMainWindow):
         natural_sort(images, key=lambda x: x.lower())
         return images
 
-    def openDirDialog(self, _value=False, dirpath=None, silent=False):
-        if not self.mayContinue():
+    def openDirDialog(self, _value=False, dirpath=None, silent=False, mode=0):
+        if not self.mayContinue(self.showMode):
             return
 
         defaultOpenDirPath = dirpath if dirpath else "."
-        if self.lastOpenDir and os.path.exists(self.lastOpenDir):
-            defaultOpenDirPath = self.lastOpenDir
+        if self.lastOpenDir[mode] and os.path.exists(self.lastOpenDir[mode]):
+            defaultOpenDirPath = self.lastOpenDir[mode]
         else:
             defaultOpenDirPath = (
                 os.path.dirname(self.filePath) if self.filePath else "."
@@ -2398,170 +2349,124 @@ class MainWindow(QMainWindow):
             )
         else:
             targetDirPath = ustr(defaultOpenDirPath)
-        self.lastOpenDir = targetDirPath
-        self.importDirImages(targetDirPath)
+        self.lastOpenDir[mode] = targetDirPath
+        self.importDirImages(targetDirPath, mode)
 
-    def openDatasetDirDialog(self):
-        if self.lastOpenDir and os.path.exists(self.lastOpenDir):
-            if platform.system() == "Windows":
-                os.startfile(self.lastOpenDir)
-            else:
-                os.system("open " + os.path.normpath(self.lastOpenDir))
-            defaultOpenDirPath = self.lastOpenDir
-
-        else:
-            if self.lang == "ch":
-                self.msgBox.warning(self, "提示", "\n 原文件夹已不存在,请从新选择数据集路径!")
-            else:
-                self.msgBox.warning(
-                    self,
-                    "Warn",
-                    "\n The original folder no longer exists, please choose the data set path again!",
-                )
-
-            self.actions.open_dataset_dir.setEnabled(False)
-            defaultOpenDirPath = (
-                os.path.dirname(self.filePath) if self.filePath else "."
-            )
-
-    def init_key_list(self, label_dict):
-        if not self.kie_mode:
+    def importDirImages(self, dirpath, mode=0, isDelete=False):
+        if not self.mayContinue(self.showMode) or not dirpath:
             return
-        # load key_cls
-        for image, info in label_dict.items():
-            for box in info:
-                if "key_cls" not in box:
-                    box.update({"key_cls": "None"})
-                self.existed_key_cls_set.add(box["key_cls"])
-        if len(self.existed_key_cls_set) > 0:
-            for key_text in self.existed_key_cls_set:
-                if not self.keyList.findItemsByLabel(key_text):
-                    item = self.keyList.createItemFromLabel(key_text)
-                    self.keyList.addItem(item)
-                    rgb = self._get_rgb_by_label(key_text, self.kie_mode)
-                    self.keyList.setItemLabel(item, key_text, rgb)
-
-        if self.keyDialog is None:
-            # key list dialog
-            self.keyDialog = KeyDialog(
-                text=self.key_dialog_tip,
-                parent=self,
-                labels=self.existed_key_cls_set,
-                sort_labels=True,
-                show_text_field=True,
-                completion="startswith",
-                fit_to_content={"column": True, "row": False},
-                flags=None,
-            )
-
-    def importDirImages(self, dirpath, isDelete=False):
-        if not self.mayContinue() or not dirpath:
-            return
-        if self.defaultSaveDir and self.defaultSaveDir != dirpath:
-            self.saveLabelFile()
+        if self.defaultSaveDir[mode] and self.defaultSaveDir[mode] != dirpath:
+            self.saveLabelFile(self.showMode)
 
         if not isDelete:
-            self.loadFilestate(dirpath)
-            self.PPlabelpath = dirpath + "/Label.txt"
-            self.PPlabel = self.loadLabelFile(self.PPlabelpath)
-            self.Cachelabelpath = dirpath + "/Cache.cach"
-            self.Cachelabel = self.loadLabelFile(self.Cachelabelpath)
-            if self.Cachelabel:  # 如果 `Cachelabel` 存在，将其与 `PPlabel` 合并。
-                self.PPlabel = dict(self.Cachelabel, **self.PPlabel)
+            self.loadFilestate(dirpath, mode)
+            self.PPlabelpath[mode] = dirpath + "/Label.txt"
+            self.PPlabel[mode] = self.loadLabelFile(self.PPlabelpath[mode])
+            if mode == 1:
+                self.Cachelabelpath = dirpath + "/Cache.cach"
+                self.Cachelabel = self.loadLabelFile(self.Cachelabelpath)
+                if self.Cachelabel:  # 如果 `Cachelabel` 存在，将其与 `PPlabel` 合并。
+                    self.PPlabel[mode] = dict(self.Cachelabel, **self.PPlabel[mode])
 
-            self.init_key_list(self.PPlabel)
+            # self.init_key_list(self.PPlabel)
 
-        self.lastOpenDir = dirpath
-        self.dirname = dirpath
+        self.lastOpenDir[mode] = dirpath
+        self.dirname[mode] = dirpath
 
-        self.defaultSaveDir = dirpath
+        self.defaultSaveDir[mode] = dirpath
         self.statusBar().showMessage(
             "%s started. Annotation will be saved to %s"
-            % (__appname__, self.defaultSaveDir)
+            % (__appname__, self.defaultSaveDir[mode])
         )
         self.statusBar().show()
 
+        fileListWidget = (
+            self.templateFileListWidget if mode == 0 else self.recogFileListWidget
+        )
+        fileListWidget.clear()
+
         self.filePath = None
-        self.templateFileListWidget.clear()
-        self.mImgList = self.scanAllImages(dirpath)
-        self.mImgList5 = self.mImgList[:5]
-        self.openNextImg()
+        self.mImgList[mode] = self.scanAllImages(dirpath)
+        self.mImgList5 = self.mImgList[mode][:5]
+        self.openNextImg(mode)
         doneicon = newIcon("done")
         closeicon = newIcon("close")
-        for imgPath in self.mImgList:
+        for imgPath in self.mImgList[mode]:
             filename = os.path.basename(imgPath)
-            if self.validFilestate(imgPath) is True:
+            if self.validFilestate(imgPath, mode) is True:
                 item = QListWidgetItem(doneicon, filename)
             else:
                 item = QListWidgetItem(closeicon, filename)
-            self.templateFileListWidget.addItem(item)
+            fileListWidget.addItem(item)
 
-        print("DirPath in importDirImages is", dirpath)
+        if mode == 0:
+            print("DirPath in importTemplateDirImages is", dirpath)
+        elif mode == 1:
+            print("DirPath in importRecognitionDirImages is", dirpath)
+
         self.iconlist.clear()
         self.additems5(dirpath)
-        # 设置一系列标志和按钮的状态。
-        self.changeFileFolder = True
+        # 设置一系列标志和按钮的状态。TODO
+        # self.changeFileFolder = True
         self.haveAutoReced = False
-        self.AutoRecognition.setEnabled(True)
-        self.reRecogButton.setEnabled(True)
-        # self.tableRecButton.setEnabled(True)
-        self.actions.AutoRec.setEnabled(True)
-        self.actions.reRec.setEnabled(True)
-        # self.actions.tableRec.setEnabled(True)
-        self.actions.open_dataset_dir.setEnabled(True)
         self.actions.rotateLeft.setEnabled(True)
         self.actions.rotateRight.setEnabled(True)
+        if mode == 1 and self.operateMode == 1:
+            self.AutoRecognition.setEnabled(True)
+            self.reRecogButton.setEnabled(True)
+            self.actions.AutoRec.setEnabled(True)
+            self.actions.reRec.setEnabled(True)
 
-        self.templateFileListWidget.setCurrentRow(0)  # set list index to first
-        self.templateFileListDock.setWindowTitle(
-            self.templateFileListName + f" (1/{self.templateFileListWidget.count()})"
+        fileListWidget.setCurrentRow(0)  # set list index to first
+        fileListWidget.setWindowTitle(
+            f" (1/{fileListWidget.count()})"
         )  # show image count
 
-    def openPrevImg(self, _value=False):
-        if len(self.mImgList) <= 0:
+    def openPrevImg(self, _value=False, mode=0):
+        if len(self.mImgList[mode]) <= 0:
             return
 
         if self.filePath is None:
             return
 
-        currIndex = self.mImgList.index(self.filePath)
-        self.mImgList5 = self.mImgList[:5]
+        currIndex = self.mImgList[mode].index(self.filePath)
+        self.mImgList5 = self.mImgList[mode][:5]
         if currIndex - 1 >= 0:
-            filename = self.mImgList[currIndex - 1]
-            self.mImgList5 = self.indexTo5Files(currIndex - 1)
+            filename = self.mImgList[mode][currIndex - 1]
+            self.mImgList5 = self.indexTo5Files(currIndex - 1, mode)
             if filename:
-                self.loadFile(filename)
+                self.loadFile(filename, mode)
 
-    def openNextImg(self, _value=False):
-        if not self.mayContinue():
+    def openNextImg(self, _value=False, mode=0):
+        if not self.mayContinue(self.showMode):
             return
 
-        if len(self.mImgList) <= 0:
+        if len(self.mImgList[mode]) <= 0:
             return
 
         filename = None
         if self.filePath is None:
-            filename = self.mImgList[0]
-            self.mImgList5 = self.mImgList[:5]
+            filename = self.mImgList[mode][0]
+            self.mImgList5 = self.mImgList[mode][:5]
         else:
-            currIndex = self.mImgList.index(self.filePath)
-            if currIndex + 1 < len(self.mImgList):
-                filename = self.mImgList[currIndex + 1]
-                self.mImgList5 = self.indexTo5Files(currIndex + 1)
+            currIndex = self.mImgList[mode].index(self.filePath)
+            if currIndex + 1 < len(self.mImgList[mode]):
+                filename = self.mImgList[mode][currIndex + 1]
+                self.mImgList5 = self.indexTo5Files(currIndex + 1, mode)
             else:
-                self.mImgList5 = self.indexTo5Files(currIndex)
+                self.mImgList5 = self.indexTo5Files(currIndex, mode)
         if filename:
             print("file name in openNext is ", filename)
-            self.loadFile(filename)
+            self.loadFile(filename, mode)
 
     def updateFileListIcon(self, filename):
         pass
 
-    def saveFile(self, _value=False, mode="Manual"):
+    def saveFile(self, _value=False, mode_="Manual", mode=0):
         # Manual mode is used for users click "Save" manually,which will change the state of the image
         if self.filePath:
             imgidx = self.getImglabelidx(self.filePath)  # 文件名
-            self._saveFile(imgidx, mode=mode)
+            self._saveFile(imgidx, mode_=mode_, mode=mode)
 
     def saveLockedShapes(self):
         self.canvas.lockedShapes = []
@@ -2575,11 +2480,11 @@ class MainWindow(QMainWindow):
                 self.canvas.selectedShapes.remove(s)
                 self.canvas.shapes.remove(s)
 
-    def _saveFile(self, annotationFilePath, mode="Manual"):
+    def _saveFile(self, annotationFilePath, mode_="Manual", mode=0):
         if len(self.canvas.lockedShapes) != 0:
             self.saveLockedShapes()
 
-        if mode == "Manual":
+        if mode_ == "Manual":
             self.result_dic_locked = []
             img = cv2.imread(self.filePath)
             width, height = self.image.width(), self.image.height()
@@ -2589,34 +2494,44 @@ class MainWindow(QMainWindow):
                 # assert len(box) == 4
                 # 创建包含标签信息的结果列表，将边界框坐标插入到结果列表的开头
                 # result = [(shape["transcription"], 1)] # 这个1是已经识别的状态标志？
-                result = [shape["title"], shape["is_mark"], (shape["transcription"], 1)]
+                result = [shape["label"], shape["is_mark"], (shape["content"], 1)]
                 result.insert(0, box)
                 self.result_dic_locked.append(result)
             self.result_dic += self.result_dic_locked
             self.result_dic_locked = []
-            if annotationFilePath and self.saveLabels(annotationFilePath, mode=mode):
-                self.setClean()
+            if annotationFilePath and self.saveLabels(
+                annotationFilePath, mode_=mode_, mode=mode
+            ):
+                self.setClean(mode)
                 self.statusBar().showMessage("Saved to  %s" % annotationFilePath)
                 self.statusBar().show()
-                currIndex = self.mImgList.index(self.filePath)
-                item = self.templateFileListWidget.item(currIndex)
+                # 改变状态icon
+                currIndex = self.mImgList[mode].index(self.filePath)
+                fileListWidget = (
+                    self.templateFileListWidget
+                    if mode == 0
+                    else self.recogFileListWidget
+                )
+                item = fileListWidget.item(currIndex)
                 item.setIcon(newIcon("done"))
 
-                self.fileStatedict[self.filePath] = 1
-                if len(self.fileStatedict) % self.autoSaveNum == 0:
-                    self.saveFilestate()
-                    self.savePPlabel(mode="Auto")
+                self.fileStatedict[mode][self.filePath] = 1
+                if len(self.fileStatedict[mode]) % self.autoSaveNum == 0:
+                    self.saveFilestate(mode=mode)
+                    self.savePPlabel(mode_="Auto", mode=mode)
 
-                self.templateFileListWidget.insertItem(int(currIndex), item)
+                fileListWidget.insertItem(int(currIndex), item)
                 if not self.canvas.isInTheSameImage:
-                    self.openNextImg()
-                self.actions.saveRec.setEnabled(True)
-                self.actions.saveLabel.setEnabled(True)
-                # self.actions.exportJSON.setEnabled(True)
+                    self.openNextImg(mode=mode)
 
-        elif mode == "Auto":
-            if annotationFilePath and self.saveLabels(annotationFilePath, mode=mode):
-                self.setClean()
+                if mode == 0:
+                    self.actions.saveLabel_0.setEnabled(True)
+                elif mode == 1:
+                    self.actions.saveLabel_1.setEnabled(True)
+
+        elif mode_ == "Auto":
+            if annotationFilePath and self.saveLabels(annotationFilePath, mode_=mode_):
+                self.setClean(mode)
                 self.statusBar().showMessage("Saved to  %s" % annotationFilePath)
                 self.statusBar().show()
 
@@ -2629,7 +2544,7 @@ class MainWindow(QMainWindow):
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
 
-    def deleteImg(self):
+    def deleteImg(self, mode=0):
         deletePath = self.filePath
         if deletePath is not None:
             deleteInfo = self.deleteImgDialog()
@@ -2678,8 +2593,8 @@ class MainWindow(QMainWindow):
                 imgidx = self.getImglabelidx(self.filePath)
                 if imgidx in self.PPlabel.keys():
                     self.PPlabel.pop(imgidx)
-                self.openNextImg()
-                self.importDirImages(self.lastOpenDir, isDelete=True)
+                self.openNextImg(mode)
+                self.importDirImages(self.lastOpenDir[mode], mode=mode, isDelete=True)
 
     def deleteImgDialog(self):
         yes, cancel = QMessageBox.Yes, QMessageBox.Cancel
@@ -2692,8 +2607,8 @@ class MainWindow(QMainWindow):
         proc = QProcess()
         proc.startDetached(os.path.abspath(__file__))
 
-    def mayContinue(self):
-        if not self.dirty:
+    def mayContinue(self, mode=0):
+        if not self.dirty[mode]:
             return True
         else:
             discardChanges = self.discardChangesDialog()
@@ -2701,7 +2616,7 @@ class MainWindow(QMainWindow):
                 return True
             elif discardChanges == QMessageBox.Yes:
                 self.canvas.isInTheSameImage = True
-                self.saveFile()
+                self.saveFile(mode)
                 self.canvas.isInTheSameImage = False
                 return True
             else:
@@ -2772,12 +2687,12 @@ class MainWindow(QMainWindow):
 
     def copyShape(self):
         self.canvas.endMove(copy=True)
-        self.addLabel(self.canvas.selectedShape)
-        self.setDirty()
+        self.addLabel(self.canvas.selectedShape, self.showMode)
+        self.setDirty(self.showMode)
 
     def moveShape(self):
         self.canvas.endMove(copy=False)
-        self.setDirty()
+        self.setDirty(self.showMode)
 
     def loadPredefinedClasses(self, predefClassesFile):
         if os.path.exists(predefClassesFile) is True:
@@ -2847,41 +2762,6 @@ class MainWindow(QMainWindow):
             owidth += itemwidget.width()
         self.iconlist.setMinimumWidth(owidth + 50)
 
-    def gen_quad_from_poly(self, poly):
-        """
-        Generate min area quad from poly.
-        """
-        point_num = poly.shape[0]
-        min_area_quad = np.zeros((4, 2), dtype=np.float32)
-        rect = cv2.minAreaRect(
-            poly.astype(np.int32)
-        )  # (center (x,y), (width, height), angle of rotation)
-        box = np.array(cv2.boxPoints(rect))
-
-        first_point_idx = 0
-        min_dist = 1e4
-        for i in range(4):
-            dist = (
-                np.linalg.norm(box[(i + 0) % 4] - poly[0])
-                + np.linalg.norm(box[(i + 1) % 4] - poly[point_num // 2 - 1])
-                + np.linalg.norm(box[(i + 2) % 4] - poly[point_num // 2])
-                + np.linalg.norm(box[(i + 3) % 4] - poly[-1])
-            )
-            if dist < min_dist:
-                min_dist = dist
-                first_point_idx = i
-        for i in range(4):
-            min_area_quad[i] = box[(first_point_idx + i) % 4]
-
-        bbox_new = min_area_quad.tolist()
-        bbox = []
-
-        for box in bbox_new:
-            box = list(map(int, box))
-            bbox.append(box)
-
-        return bbox
-
     def getImglabelidx(self, filePath):
         if platform.system() == "Windows":
             spliter = "\\"
@@ -2890,24 +2770,28 @@ class MainWindow(QMainWindow):
         filepathsplit = filePath.split(spliter)[-2:]
         return filepathsplit[0] + "/" + filepathsplit[1]
 
+    # TODO 限定当前模式只有在recognition时执行
     def autoRecognition(self):
-        assert self.mImgList is not None
+        mode = 1
+        assert self.mImgList[mode] is not None
         print("Using model from ", self.model)
 
-        uncheckedList = [i for i in self.mImgList if i not in self.fileStatedict.keys()]
+        uncheckedList = [
+            i for i in self.mImgList[mode] if i not in self.fileStatedict[mode].keys()
+        ]
         self.autoDialog = AutoDialog(
             parent=self, ocr=self.ocr, mImgList=uncheckedList, lenbar=len(uncheckedList)
         )
         self.autoDialog.popUp()
-        self.currIndex = len(self.mImgList) - 1
-        self.loadFile(self.filePath)  # ADD
+        self.currIndex[mode] = len(self.mImgList[mode]) - 1
+        self.loadFile(self.filePath, mode=mode)  # ADD
         self.haveAutoReced = True
         self.AutoRecognition.setEnabled(False)
         self.actions.AutoRec.setEnabled(False)
-        self.setDirty()
+        self.setDirty(mode)
         self.saveCacheLabel()
 
-        self.init_key_list(self.Cachelabel)
+        # self.init_key_list(self.Cachelabel)
 
     def reRecognition(self):
         img = cv2.imdecode(np.fromfile(self.filePath, dtype=np.uint8), 1)
@@ -2921,10 +2805,7 @@ class MainWindow(QMainWindow):
             for shape in self.canvas.shapes:
                 box = [[int(p.x()), int(p.y())] for p in shape.points]  # 四个点的坐标
                 shape_info = [shape.title, shape.is_mark]  # new
-                kie_cls = shape.key_cls
 
-                if len(box) > 4:
-                    box = self.gen_quad_from_poly(np.array(box))
                 assert len(box) == 4
 
                 img_crop = get_rotate_crop_image(img, np.array(box, np.float32))
@@ -2942,35 +2823,19 @@ class MainWindow(QMainWindow):
                         shape.label = result[0][0]
                         result = shape_info + result
                         result.insert(0, box)
-                        # if self.kie_mode:
-                        #     result.append(kie_cls)
                         self.result_dic_locked.append(result)
                     else:
                         result = shape_info + result
                         result.insert(0, box)
-                        # if self.kie_mode:
-                        #     result.append(kie_cls)
                         self.result_dic.append(result)
                 else:
                     print("Can not recognise the box")
                     if shape.line_color == DEFAULT_LOCK_COLOR:
                         shape.label = result[0][0]
-                        # if self.kie_mode:
-                        #     self.result_dic_locked.append(
-                        #         [box, (self.noLabelText, 0), kie_cls]
-                        #     )
-                        # else:
-                        #     self.result_dic_locked.append([box, (self.noLabelText, 0)])
                         self.result_dic_locked.append(
                             [box, *shape_info, (self.noLabelText, 0)]
                         )
                     else:
-                        # if self.kie_mode:
-                        #     self.result_dic.append(
-                        #         [box, (self.noLabelText, 0), kie_cls]
-                        #     )
-                        # else:
-                        #     self.result_dic.append([box, (self.noLabelText, 0)])
                         self.result_dic.append(
                             [box, *shape_info, (self.noLabelText, 0)]
                         )
@@ -2983,10 +2848,10 @@ class MainWindow(QMainWindow):
                     print("Can not recognise the box")
             if (len(self.result_dic) > 0 and rec_flag > 0) or self.canvas.lockedShapes:
                 self.canvas.isInTheSameImage = True
-                self.saveFile(mode="Auto")
+                self.saveFile(mode_="Auto")
                 self.loadFile(self.filePath)
                 self.canvas.isInTheSameImage = False
-                self.setDirty()
+                self.setDirty(mode=1)
             elif len(self.result_dic) == len(self.canvas.shapes) and rec_flag == 0:
                 if self.lang == "ch":
                     QMessageBox.information(self, "Information", "识别结果保持一致！")
@@ -3003,8 +2868,7 @@ class MainWindow(QMainWindow):
         img = cv2.imdecode(np.fromfile(self.filePath, dtype=np.uint8), 1)
         for shape in self.canvas.selectedShapes:
             box = [[int(p.x()), int(p.y())] for p in shape.points]
-            if len(box) > 4:
-                box = self.gen_quad_from_poly(np.array(box))
+
             assert len(box) == 4
             img_crop = get_rotate_crop_image(img, np.array(box, np.float32))
             if img_crop is None:
@@ -3032,144 +2896,6 @@ class MainWindow(QMainWindow):
             self.singleLabel(shape)
             self.setDirty()
 
-    '''
-    def TableRecognition(self):
-        """
-        Table Recegnition
-        """
-        from paddleocr import to_excel
-
-        import time
-
-        start = time.time()
-        img = cv2.imread(self.filePath)
-        res = self.table_ocr(img, return_ocr_result_in_table=True)
-
-        TableRec_excel_dir = self.lastOpenDir + "/tableRec_excel_output/"
-        os.makedirs(TableRec_excel_dir, exist_ok=True)
-        filename, _ = os.path.splitext(os.path.basename(self.filePath))
-
-        excel_path = TableRec_excel_dir + "{}.xlsx".format(filename)
-
-        if res is None:
-            msg = (
-                "Can not recognise the table in "
-                + self.filePath
-                + ". Please change manually"
-            )
-            QMessageBox.information(self, "Information", msg)
-            to_excel("", excel_path)  # create an empty excel
-            return
-
-        # save res
-        # ONLY SUPPORT ONE TABLE in one image
-        hasTable = False
-        for region in res:
-            if region["type"] == "table":
-                if region["res"]["boxes"] is None:
-                    msg = (
-                        "Can not recognise the detection box in "
-                        + self.filePath
-                        + ". Please change manually"
-                    )
-                    QMessageBox.information(self, "Information", msg)
-                    to_excel("", excel_path)  # create an empty excel
-                    return
-                hasTable = True
-                # save table ocr result on PPOCRLabel
-                # clear all old annotaions before saving result
-                self.itemsToShapes.clear()
-                self.shapesToItems.clear()
-                self.itemsToShapesbox.clear()  # ADD
-                self.shapesToItemsbox.clear()
-                self.labelList.clear()
-                self.indexList.clear()
-                self.BoxList.clear()
-                self.result_dic = []
-                self.result_dic_locked = []
-
-                shapes = []
-                result_len = len(region["res"]["boxes"])
-                order_index = 0
-                for i in range(result_len):
-                    bbox = np.array(region["res"]["boxes"][i])
-                    rec_text = region["res"]["rec_res"][i][0]
-
-                    rext_bbox = [
-                        [bbox[0], bbox[1]],
-                        [bbox[2], bbox[1]],
-                        [bbox[2], bbox[3]],
-                        [bbox[0], bbox[3]],
-                    ]
-
-                    # save bbox to shape
-                    shape = Shape(
-                        label=rec_text, line_color=DEFAULT_LINE_COLOR, key_cls=None
-                    )
-                    for point in rext_bbox:
-                        x, y = point
-                        # Ensure the labels are within the bounds of the image.
-                        # If not, fix them.
-                        x, y, snapped = self.canvas.snapPointToCanvas(x, y)
-                        shape.addPoint(QPointF(x, y))
-                    shape.difficult = False
-                    shape.idx = order_index
-                    order_index += 1
-                    # shape.locked = False
-                    shape.close()
-                    self.addLabel(shape)
-                    shapes.append(shape)
-                self.setDirty()
-                self.canvas.loadShapes(shapes)
-
-                # save HTML result to excel
-                try:
-                    to_excel(region["res"]["html"], excel_path)
-                except:
-                    print(
-                        "Can not save excel file, maybe Permission denied (.xlsx is being occupied)"
-                    )
-                break
-
-        if not hasTable:
-            msg = (
-                "Can not recognise the table in "
-                + self.filePath
-                + ". Please change manually"
-            )
-            QMessageBox.information(self, "Information", msg)
-            to_excel("", excel_path)  # create an empty excel
-            return
-
-        # automatically open excel annotation file
-        if platform.system() == "Windows":
-            try:
-                import win32com.client
-            except:
-                print(
-                    "CANNOT OPEN .xlsx. It could be one of the following reasons: "
-                    "Only support Windows | No python win32com"
-                )
-
-            try:
-                xl = win32com.client.Dispatch("Excel.Application")
-                xl.Visible = True
-                xl.Workbooks.Open(excel_path)
-                # excelEx = "You need to show the excel executable at this point"
-                # subprocess.Popen([excelEx, excel_path])
-
-                # os.startfile(excel_path)
-            except:
-                print(
-                    "CANNOT OPEN .xlsx. It could be the following reasons: "
-                    ".xlsx is not existed"
-                )
-        else:
-            os.system("open " + os.path.normpath(excel_path))
-
-        print("time cost: ", time.time() - start)
-    '''
-
     def cellreRecognition(self):
         """
         re-recognise text in a cell
@@ -3178,8 +2904,6 @@ class MainWindow(QMainWindow):
         for shape in self.canvas.selectedShapes:
             box = [[int(p.x()), int(p.y())] for p in shape.points]
 
-            if len(box) > 4:
-                box = self.gen_quad_from_poly(np.array(box))
             assert len(box) == 4
 
             # pad around bbox for better text recognition accuracy
@@ -3227,79 +2951,6 @@ class MainWindow(QMainWindow):
                     shape.label = self.noLabelText
             self.singleLabel(shape)
             self.setDirty()
-
-    '''
-    def exportJSON(self):
-        """
-        export PPLabel and CSV to JSON (PubTabNet)
-        """
-        import pandas as pd
-
-        # automatically save annotations
-        self.saveFilestate()
-        self.savePPlabel(mode="auto")
-
-        # load box annotations
-        labeldict = {}
-        if not os.path.exists(self.PPlabelpath):
-            msg = "ERROR, Can not find Label.txt"
-            QMessageBox.information(self, "Information", msg)
-            return
-        else:
-            with open(self.PPlabelpath, "r", encoding="utf-8") as f:
-                data = f.readlines()
-                for each in data:
-                    file, label = each.split("\t")
-                    if label:
-                        label = label.replace("false", "False")
-                        label = label.replace("true", "True")
-                        labeldict[file] = eval(label)
-                    else:
-                        labeldict[file] = []
-
-        # read table recognition output
-        TableRec_excel_dir = os.path.join(self.lastOpenDir, "tableRec_excel_output")
-
-        # save txt
-        fid = open("{}/gt.txt".format(self.lastOpenDir), "w", encoding="utf-8")
-        for image_path in labeldict.keys():
-            # load csv annotations
-            filename, _ = os.path.splitext(os.path.basename(image_path))
-            csv_path = os.path.join(TableRec_excel_dir, filename + ".xlsx")
-            if not os.path.exists(csv_path):
-                continue
-
-            excel = xlrd.open_workbook(csv_path)
-            sheet0 = excel.sheet_by_index(0)  # only sheet 0
-            merged_cells = (
-                sheet0.merged_cells
-            )  # (0,1,1,3) start row, end row, start col, end col
-
-            html_list = [["td"] * sheet0.ncols for i in range(sheet0.nrows)]
-
-            for merged in merged_cells:
-                html_list = expand_list(merged, html_list)
-
-            token_list = convert_token(html_list)
-
-            # load box annotations
-            cells = []
-            for anno in labeldict[image_path]:
-                tokens = list(anno["transcription"])
-                cells.append({"tokens": tokens, "bbox": anno["points"]})
-
-            # 构造标注信息
-            html = {"structure": {"tokens": token_list}, "cells": cells}
-            d = {"filename": os.path.basename(image_path), "html": html}
-            # 重构HTML
-            d["gt"] = rebuild_html_from_ppstructure_label(d)
-            fid.write("{}\n".format(json.dumps(d, ensure_ascii=False)))
-
-        # convert to PP-Structure label format
-        fid.close()
-        msg = "JSON sucessfully saved in {}/gt.txt".format(self.lastOpenDir)
-        QMessageBox.information(self, "Information", msg)
-    '''
 
     def autolcm(self):
         vbox = QVBoxLayout()
@@ -3367,26 +3018,30 @@ class MainWindow(QMainWindow):
     def cancel(self):
         self.dialog.close()
 
-    def loadFilestate(self, saveDir):
-        self.fileStatepath = saveDir + "/fileState.txt"
-        self.fileStatedict = {}
-        if not os.path.exists(self.fileStatepath):
-            f = open(self.fileStatepath, "w", encoding="utf-8")
+    def loadFilestate(self, saveDir, mode=0):
+        self.fileStatepath[mode] = saveDir + "/fileState.txt"
+        fileStatedict = self.fileStatedict[mode]
+        fileStatedict = {}
+        action_saveLabel = (
+            self.actions.saveLabel_0 if mode == 0 else self.actions.saveLabel_1
+        )
+        if not os.path.exists(self.fileStatepath[mode]):
+            f = open(self.fileStatepath[mode], "w", encoding="utf-8")
         else:
-            with open(self.fileStatepath, "r", encoding="utf-8") as f:
+            with open(self.fileStatepath[mode], "r", encoding="utf-8") as f:
                 states = f.readlines()
                 for each in states:
                     file, state = each.split("\t")
-                    self.fileStatedict[file] = 1
-                self.actions.saveLabel.setEnabled(True)
-                self.actions.saveRec.setEnabled(True)
+                    fileStatedict[file] = 1
+                action_saveLabel.setEnabled(True)
+                # self.actions.saveRec.setEnabled(True)
                 # self.actions.exportJSON.setEnabled(True)
 
-    def saveFilestate(self):
-        with open(self.fileStatepath, "w", encoding="utf-8") as f:
-            for key in self.fileStatedict:
+    def saveFilestate(self, mode=0):
+        with open(self.fileStatepath[mode], "w", encoding="utf-8") as f:
+            for key in self.fileStatedict[mode]:
                 f.write(key + "\t")
-                f.write(str(self.fileStatedict[key]) + "\n")
+                f.write(str(self.fileStatedict[mode][key]) + "\n")
 
     def loadLabelFile(self, labelpath):
         labeldict = {}
@@ -3401,83 +3056,42 @@ class MainWindow(QMainWindow):
                     if label:
                         label = label.replace("false", "False")
                         label = label.replace("true", "True")
+                        label = label.replace("null", "None")
                         labeldict[file] = eval(label)  # 在labeldict字典里添加项：file - label
                     else:
                         labeldict[file] = []
         return labeldict
 
-    def savePPlabel(self, mode="Manual"):
-        savedfile = [self.getImglabelidx(i) for i in self.fileStatedict.keys()]
-        with open(self.PPlabelpath, "w", encoding="utf-8") as f:
-            for key in self.PPlabel:
-                if key in savedfile and self.PPlabel[key] != []:
+    def savePPlabel(self, mode_="Manual", mode=0):
+        savedfile = [self.getImglabelidx(i) for i in self.fileStatedict[mode].keys()]
+        with open(self.PPlabelpath[mode], "w", encoding="utf-8") as f:
+            for key in self.PPlabel[mode]:
+                if key in savedfile and self.PPlabel[mode][key] != []:
                     f.write(key + "\t")
-                    f.write(json.dumps(self.PPlabel[key], ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(self.PPlabel[mode][key], ensure_ascii=False) + "\n"
+                    )
 
-        if mode == "Manual":
+        if mode_ == "Manual":
             if self.lang == "ch":
-                msg = "已将检查过的图片标签保存在 " + self.PPlabelpath + " 文件中"
+                msg = "已将检查过的图片标签保存在 " + self.PPlabelpath[mode] + " 文件中"
             else:
-                msg = "Images that have been checked are saved in " + self.PPlabelpath
+                msg = (
+                    "Images that have been checked are saved in "
+                    + self.PPlabelpath[mode]
+                )
             QMessageBox.information(self, "Information", msg)
 
+    # 仅在recognition模式下触发
     def saveCacheLabel(self):
         with open(self.Cachelabelpath, "w", encoding="utf-8") as f:
             for key in self.Cachelabel:
                 f.write(key + "\t")
                 f.write(json.dumps(self.Cachelabel[key], ensure_ascii=False) + "\n")
 
-    def saveLabelFile(self):
-        self.saveFilestate()
-        self.savePPlabel()
-
-    # 保存每个cropimage和对应内容
-    def saveRecResult(self):
-        if {} in [self.PPlabelpath, self.PPlabel, self.fileStatedict]:
-            QMessageBox.information(self, "Information", "Check the image first")
-            return
-
-        rec_gt_dir = os.path.dirname(self.PPlabelpath) + "/rec_gt.txt"
-        crop_img_dir = os.path.dirname(self.PPlabelpath) + "/crop_img/"
-        ques_img = []
-        if not os.path.exists(crop_img_dir):
-            os.mkdir(crop_img_dir)
-
-        with open(rec_gt_dir, "w", encoding="utf-8") as f:
-            for key in self.fileStatedict:
-                idx = self.getImglabelidx(key)
-                try:
-                    img = cv2.imread(key)
-                    for i, label in enumerate(self.PPlabel[idx]):
-                        if label["difficult"]:
-                            continue
-                        img_crop = get_rotate_crop_image(
-                            img, np.array(label["points"], np.float32)
-                        )
-                        img_name = (
-                            os.path.splitext(os.path.basename(idx))[0]
-                            + "_crop_"
-                            + str(i)
-                            + ".jpg"
-                        )
-                        cv2.imwrite(crop_img_dir + img_name, img_crop)
-                        f.write("crop_img/" + img_name + "\t")
-                        f.write(label["transcription"] + "\n")
-                except Exception as e:
-                    ques_img.append(key)
-                    print("Can not read image ", e)
-        if ques_img:
-            QMessageBox.information(
-                self,
-                "Information",
-                "The following images can not be saved, please check the image path and labels.\n"
-                + "".join(str(i) + "\n" for i in ques_img),
-            )
-        QMessageBox.information(
-            self,
-            "Information",
-            "Cropped images have been saved in " + str(crop_img_dir),
-        )
+    def saveLabelFile(self, mode=0):
+        self.saveFilestate(mode)
+        self.savePPlabel(mode)
 
     def speedChoose(self):
         if self.labelDialogOption.isChecked():
@@ -3492,7 +3106,8 @@ class MainWindow(QMainWindow):
         if self.autoSaveOption.isChecked():
             self.autoSaveNum = 1  # Real auto_Save
             try:
-                self.saveLabelFile()
+                self.saveLabelFile(mode=0)
+                self.saveLabelFile(mode=1)
             except:
                 pass
             print("The program will automatically save once after confirming an image")
@@ -3502,54 +3117,42 @@ class MainWindow(QMainWindow):
                 "The program will automatically save once after confirming 5 images (default)"
             )
 
-    def change_box_key(self):
-        if not self.kie_mode:
-            return
-        key_text, _ = self.keyDialog.popUp(self.key_previous_text)
-        if key_text is None:
-            return
-        self.key_previous_text = key_text
-        for shape in self.canvas.selectedShapes:
-            shape.key_cls = key_text
-            if not self.keyList.findItemsByLabel(key_text):
-                item = self.keyList.createItemFromLabel(key_text)
-                self.keyList.addItem(item)
-                rgb = self._get_rgb_by_label(key_text, self.kie_mode)
-                self.keyList.setItemLabel(item, key_text, rgb)
-
-            self._update_shape_color(shape)
-            self.keyDialog.addLabelHistory(key_text)
-
-        # save changed shape
-        self.setDirty()
-
     def undoShapeEdit(self):
+        # 默认使用当前showMode
+        mode = self.showMode
         self.canvas.restoreShape()
-        """
-        self.labelList.clear()
-        self.indexList.clear()
-        self.BoxList.clear()
-        """
-        self.templateIndexList.clear()
-        self.templateLabelList.clear()
+        if mode == 0:
+            self.templateIndexList.clear()
+            self.templateLabelList.clear()
+        elif mode == 1:
+            self.recogIndexList.clear()
+            self.recogLabelList.clear()
+            self.recogContentList.clear()
         self.loadShapes(self.canvas.shapes)
         self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
 
     def loadShapes(self, shapes, replace=True):
+        # 默认使用当前showMode
+        mode = self.showMode
         self._noSelectionSlot = True
         for shape in shapes:
-            self.addLabel(shape)
+            self.addLabel(shape, mode)
         """
         self.labelList.clearSelection()
         self.indexList.clearSelection()
         """
-        self.templateLabelList.clearSelection()
-        self.templateIndexList.clearSelection()
+        if mode == 0:
+            self.templateIndexList.clearSelection()
+            self.templateLabelList.clearSelection()
+        elif mode == 1:
+            self.recogIndexList.clearSelection()
+            self.recogLabelList.clearSelection()
+            self.recogContentList.clearSelection()
         self._noSelectionSlot = False
         self.canvas.loadShapes(shapes, replace=replace)
         print("loadShapes")  # 1
 
-    def lockSelectedShape(self):
+    def lockSelectedShape(self, mode=0):
         """lock the selected shapes.
 
         Add self.selectedShapes to lock self.canvas.lockedShapes,
@@ -3558,18 +3161,19 @@ class MainWindow(QMainWindow):
         """
         width, height = self.image.width(), self.image.height()
 
+        action_check = self.actions.check_0 if mode == 0 else self.actions.check_1
+
         def format_shape(s):
             return dict(
-                title=s.title,  # str
-                is_mark=s.is_mark,  # bool
                 label=s.label,  # str
+                is_mark=s.is_mark,  # bool
+                content=s.content,  # str
                 line_color=s.line_color.getRgb(),
                 fill_color=s.fill_color.getRgb(),
                 ratio=[
                     [int(p.x()) / width, int(p.y()) / height] for p in s.points
                 ],  # QPonitF
                 difficult=s.difficult,  # bool
-                key_cls=s.key_cls,  # bool
             )
 
         # lock
@@ -3581,17 +3185,15 @@ class MainWindow(QMainWindow):
             trans_dic = []
             for box in shapes:
                 trans_dict = {
-                    "title": box["title"],
+                    "label": box["label"],
                     "is_mark": box["is_mark"],
-                    "transcription": box["label"],
+                    "content": box["content"],
                     "ratio": box["ratio"],
                     "difficult": box["difficult"],
                 }
-                # if self.kie_mode:
-                #     trans_dict.update({"key_cls": box["key_cls"]})
                 trans_dic.append(trans_dict)
             self.canvas.lockedShapes = trans_dic
-            self.actions.save.setEnabled(True)
+            action_check.setEnabled(True)
 
         # unlock
         else:
@@ -3599,8 +3201,8 @@ class MainWindow(QMainWindow):
                 s.line_color = DEFAULT_LINE_COLOR
             self.canvas.lockedShapes = []
             self.result_dic_locked = []
-            self.setDirty()
-            self.actions.save.setEnabled(True)
+            self.setDirty(mode)
+            action_check.setEnabled(True)
 
 
 def inverted(color):
@@ -3631,7 +3233,6 @@ def get_main_app(argv=[]):
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--lang", type=str, default="en", nargs="?")
     arg_parser.add_argument("--gpu", type=str2bool, default=True, nargs="?")
-    arg_parser.add_argument("--kie", type=str2bool, default=False, nargs="?")
     arg_parser.add_argument(
         "--predefined_classes_file",
         default=os.path.join(
@@ -3644,7 +3245,6 @@ def get_main_app(argv=[]):
     win = MainWindow(
         lang=args.lang,
         gpu=args.gpu,
-        kie_mode=args.kie,
         default_predefined_class_file=args.predefined_classes_file,
     )
     win.show()
