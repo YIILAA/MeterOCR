@@ -108,7 +108,6 @@ class LabelDialog(QDialog):
         except AttributeError:
             # PyQt5: AttributeError: 'str' object has no attribute 'trimmed'
             self.edit_label.setText(self.edit_label.text())
-            print(self.edit_label.text())
 
     def postProcess_(self):
         try:
@@ -117,12 +116,14 @@ class LabelDialog(QDialog):
         except AttributeError:
             # PyQt5: AttributeError: 'str' object has no attribute 'trimmed'
             self.edit_content.setText(self.edit_content.text())
-            print(self.edit_content.text())
 
-    def popUp(self, text="", move=True):
+    def popUp(self, text="", is_mark=False, content="", move=True):
         self.edit_label.setText(text)
-        self.edit_label.setSelection(0, len(text))
+        # self.edit_label.setSelection(0, len(text))
         self.edit_label.setFocus(Qt.PopupFocusReason)
+
+        self.choice_group.button(1 if is_mark else 0).setChecked(True)
+        self.edit_content.setText(content)
         if move:
             cursor_pos = QCursor.pos()
             parent_bottomRight = self.parentWidget().geometry()
@@ -145,6 +146,7 @@ class LabelDialog(QDialog):
             # return self.edit_label.text() if self.exec_() else None
         if self.exec_():
             print(
+                "label_info is",
                 self.edit_label.text(),
                 self.choice_group.checkedId(),
                 self.edit_content.text(),

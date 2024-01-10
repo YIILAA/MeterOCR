@@ -58,7 +58,7 @@ class Shape(object):
     ):
         # === new key ===
         self.label = label
-        self.is_mark = False
+        self.is_mark = is_mark
         # === new key ===
         self.content = content
         self.idx = None  # bbox order, only for table annotation

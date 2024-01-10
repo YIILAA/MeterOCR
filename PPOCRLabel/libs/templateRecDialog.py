@@ -12,7 +12,7 @@ import json
 import cv2
 import numpy as np
 
-from libs.utils import newIcon
+from libs.utils import newIcon, get_rotate_crop_image
 
 BB = QDialogButtonBox
 
@@ -23,10 +23,11 @@ class Worker(QThread):
     endsignal = pyqtSignal(int, str)
     handle = 0
 
-    def __init__(self, ocr, mImgList, mainThread, model):
+    def __init__(self, ocr, mImgList, templateBoxs, mainThread, model):
         super(Worker, self).__init__()
         self.ocr = ocr
         self.mImgList = mImgList
+        self.templateBoxs = templateBoxs
         self.mainThread = mainThread
         self.model = model
         self.setStackSize(1024 * 1024)
@@ -37,18 +38,100 @@ class Worker(QThread):
             for Imgpath in self.mImgList:
                 if self.handle == 0:
                     self.listValue.emit(Imgpath)
+                    self.result_dic = []
+
                     if self.model == "paddle":
-                        h, w, _ = cv2.imdecode(
-                            np.fromfile(Imgpath, dtype=np.uint8), 1
-                        ).shape
-                        if h > 32 and w > 32:
-                            self.result_dic = self.ocr.ocr(Imgpath, cls=True, det=True)[
-                                0
+                        # 第一次检测
+                        self.ocr_dic = self.ocr.ocr(Imgpath, cls=True, det=True)[0]
+
+                        marks = []
+                        for box in self.templateBoxs:
+                            if box["is_mark"]:
+                                marks.append(box)
+
+                        box_rec = []
+                        box_temp = []
+                        for mark_box in marks:
+                            for ocr_box in self.ocr_dic:
+                                if mark_box["label"] and ocr_box[1][0]:
+                                    if (
+                                        mark_box["label"].casefold()
+                                        == ocr_box[1][0].casefold()
+                                    ):
+                                        box_rec.append(ocr_box)
+                                        box_temp.append(mark_box)
+
+                        print("box_rec", box_rec)
+                        print("box_temp", box_temp)
+
+                        if len(box_rec) >= 2:
+                            # 对齐 目前只采用两个点 随机选择?
+                            # 每个框用中心点来对齐
+                            [cx1_rec, cy1_rec] = [
+                                (a + b + c + d) / 4
+                                for a, b, c, d in zip(
+                                    box_rec[0][0][0],
+                                    box_rec[0][0][1],
+                                    box_rec[0][0][2],
+                                    box_rec[0][0][3],
+                                )
                             ]
+                            [cx2_rec, cy2_rec] = [
+                                (a + b + c + d) / 4
+                                for a, b, c, d in zip(
+                                    box_rec[1][0][0],
+                                    box_rec[1][0][1],
+                                    box_rec[1][0][2],
+                                    box_rec[1][0][3],
+                                )
+                            ]
+                            [cx1_temp, cy1_temp] = [
+                                (a + b + c + d) / 4
+                                for a, b, c, d in zip(
+                                    box_temp[0]["points"][0],
+                                    box_temp[0]["points"][1],
+                                    box_temp[0]["points"][2],
+                                    box_temp[0]["points"][3],
+                                )
+                            ]
+                            [cx2_temp, cy2_temp] = [
+                                (a + b + c + d) / 4
+                                for a, b, c, d in zip(
+                                    box_temp[1]["points"][0],
+                                    box_temp[1]["points"][1],
+                                    box_temp[1]["points"][2],
+                                    box_temp[1]["points"][3],
+                                )
+                            ]
+                            ratio_x = (cx1_rec - cx2_rec) / (cx1_temp - cx2_temp)
+                            ratio_y = (cy1_rec - cy2_rec) / (cy1_temp - cy2_temp)
+                            dx = cx1_temp * ratio_x - cx1_rec
+                            dy = cy1_temp * ratio_y - cy1_rec
+
+                            # 对所有templateBoxs进行坐标换算并识别
+                            img = cv2.imdecode(np.fromfile(Imgpath, dtype=np.uint8), 1)
+                            for templateBox in self.templateBoxs:
+                                recPoints = [
+                                    [x * ratio_x - dx, y * ratio_y - dy]
+                                    for [x, y] in templateBox["points"]
+                                ]
+
+                                assert len(recPoints) == 4
+
+                                img_crop = get_rotate_crop_image(
+                                    img, np.array(recPoints, np.float32)
+                                )
+                                result = self.ocr.ocr(img_crop, cls=True, det=False)[0]
+                                result = [
+                                    recPoints,
+                                    result[0],
+                                    templateBox["label"],
+                                    templateBox["is_mark"],
+                                ]
+                                self.result_dic.append(result)
+
                         else:
-                            print(
-                                "The size of", Imgpath, "is too small to be recognised"
-                            )
+                            print("匹配到的对准框少于两个，模版识别失败")
                             self.result_dic = None
 
                     # 结果保存
@@ -70,10 +153,6 @@ class Worker(QThread):
                                 + json.dumps(posi)
                                 + "\n"
                             )
-                        # label, is_mark
-                        self.result_dic = [
-                            res + [None, False] for res in self.result_dic
-                        ]
                         # Sending large amounts of data repeatedly through pyqtSignal may affect the program efficiency
                         self.listValue.emit(strs)
                         self.mainThread.result_dic = self.result_dic
@@ -91,16 +170,23 @@ class Worker(QThread):
             raise
 
 
-class AutoDialog(QDialog):
+class templateRecDialog(QDialog):
     def __init__(
-        self, text="Enter object label", parent=None, ocr=None, mImgList=None, lenbar=0
+        self,
+        text="Enter object label",
+        parent=None,
+        ocr=None,
+        mImgList=None,
+        lenbar=0,
+        templateBoxs=None,
     ):
-        super(AutoDialog, self).__init__(parent)
+        super(templateRecDialog, self).__init__(parent)
         self.setFixedWidth(1000)
         self.parent = parent
         self.ocr = ocr
         self.mImgList = mImgList
         self.lender = lenbar
+        self.templateBoxs = templateBoxs
         self.pb = QProgressBar()
         self.pb.setRange(0, self.lender)
         self.pb.setValue(0)
@@ -125,7 +211,9 @@ class AutoDialog(QDialog):
 
         # self.setWindowFlags(Qt.WindowCloseButtonHint)
 
-        self.thread_1 = Worker(self.ocr, self.mImgList, self.parent, "paddle")
+        self.thread_1 = Worker(
+            self.ocr, self.mImgList, self.templateBoxs, self.parent, "paddle"
+        )
         self.thread_1.progressBarValue.connect(self.handleProgressBarSingal)
         self.thread_1.listValue.connect(self.handleListWidgetSingal)
         self.thread_1.endsignal.connect(self.handleEndsignalSignal)

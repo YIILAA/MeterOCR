@@ -60,6 +60,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QButtonGroup,
     QRadioButton,
+    QLineEdit,
 )
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +82,7 @@ from libs.zoomWidget import ZoomWidget
 from libs.autoDialog import AutoDialog
 from libs.labelDialog import LabelDialog
 from libs.colorDialog import ColorDialog
+from libs.templateRecDialog import templateRecDialog
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
 from libs.editinlist import EditInList
@@ -327,19 +329,27 @@ class MainWindow(QMainWindow):
         self.recogFileListDock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         # ================== current template  ==================
-        # self.templateShowBoxContainer
-        templateShowBox = QHBoxLayout()
+        # self.templateRecogBoxContainer
+        templateRecogBox = QVBoxLayout()
 
-        showText = QLabel()
-        showText.setText("choose template")
-        templateShowBox.addWidget(showText)
+        self.showText = QLabel()
+        self.showText.setText(getStr("templateRecogHint"))
 
-        templateThumbnail = QLabel()
-        templateThumbnail.setText("TODO: input filename")
-        templateShowBox.addWidget(templateThumbnail)
+        templateRecogSublayout = QHBoxLayout()
+        self.templateFileName = QLineEdit()
+        self.templateRecogButton = QToolButton()
+        self.templateRecogButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.templateRecogButton.setIcon(newIcon("Auto"))  # TODO change icon
+        templateRecogSublayout.addWidget(self.templateFileName)
+        templateRecogSublayout.addWidget(self.templateRecogButton)
 
-        self.templateShowBoxContainer = QWidget()
-        self.templateShowBoxContainer.setLayout(templateShowBox)
+        templateRecogBox.addWidget(self.showText)
+        templateRecogBox.addItem(templateRecogSublayout)
+
+        self.templateRecogBoxContainer = QWidget()
+        self.templateRecogBoxContainer.setLayout(templateRecogBox)
+
+        self.templateFileName.textChanged.connect(self.on_templateFileName_input)
 
         #  ================== Buttons  ==================
         # recogToolBoxContainer
@@ -374,7 +384,7 @@ class MainWindow(QMainWindow):
         recogToolBox.addWidget(self.newButton_1, 0, 1, 1, 1)
         recogToolBox.addWidget(self.reRecogButton, 1, 0, 1, 1)
         recogToolBox.addWidget(self.checkButton_1, 1, 1, 1, 1)
-        recogToolBox.addWidget(self.saveLabelButton_1, 2, 0, 1, 2)
+        recogToolBox.addWidget(self.saveLabelButton_1, 2, 0, 1, 1)
         recogToolBoxContainer = QWidget()
         recogToolBoxContainer.setLayout(recogToolBox)
 
@@ -412,6 +422,9 @@ class MainWindow(QMainWindow):
         self.recogLabelList.itemSelectionChanged.connect(
             partial(self.labelSelectionChanged, mode=1)
         )
+        self.recogLabelList.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )  # no scroll Bar
 
         self.recogLabelListDockName = getStr("recogLabel")
         self.recogLabelListDock = QDockWidget(self.recogLabelListDockName, self)
@@ -477,7 +490,7 @@ class MainWindow(QMainWindow):
         #  ================== 右侧整体的设置  ==================
         # recogLayout 添加四个子组件
         recogLayout.addWidget(self.recogFileListDock)
-        recogLayout.addWidget(self.templateShowBoxContainer)
+        recogLayout.addWidget(self.templateRecogBoxContainer)
         recogLayout.addWidget(recogToolBoxContainer)
         recogLayout.addWidget(recogResultListContainer)
 
@@ -842,6 +855,15 @@ class MainWindow(QMainWindow):
             "",
             "Auto",
             getStr("autoRecognition"),
+            enabled=True,
+        )
+
+        templateRec = action(
+            getStr("templateRecognition"),
+            self.templateRecognition,
+            "",
+            "tempRec",
+            getStr("templateRecognition"),
             enabled=False,
         )
 
@@ -986,6 +1008,7 @@ class MainWindow(QMainWindow):
         self.saveLabelButton_1.setDefaultAction(saveLabel_1)
         self.AutoRecognition.setDefaultAction(AutoRec)
         self.reRecogButton.setDefaultAction(reRec)
+        self.templateRecogButton.setDefaultAction(templateRec)
 
         #  ================== Zoom layout ==================
         zoomLayout = QHBoxLayout()
@@ -1052,6 +1075,7 @@ class MainWindow(QMainWindow):
             # saveRec=saveRec,
             singleRere=singleRere,
             AutoRec=AutoRec,
+            templateRec=templateRec,
             reRec=reRec,
             cellreRec=cellreRec,
             createMode=createMode,
@@ -1515,15 +1539,25 @@ class MainWindow(QMainWindow):
         if not self.canvas.editing():
             return
         item = self.currentItem()
+        shape = self.itemsToShapes[item]
         if not item:
             return
-        text, is_mark, content = self.labelDialog.popUp(item.text())
-        # TODO 如何更新content列表？
-        if text is not None:
-            item.setText(text)
-            # item.setBackground(generateColorByText(text))
-            self.setDirty(self.showMode)
-            self.updateComboBox()
+        # text, is_mark, content = self.labelDialog.popUp(item.text())
+        print("current shape: ", shape.label, shape.is_mark, shape.content)
+        text, is_mark, content = self.labelDialog.popUp(
+            shape.label, shape.is_mark, shape.content
+        )
+        # if text is not None:
+        #     item.setText(text)
+        #     # item.setBackground(generateColorByText(text))
+        #     self.setDirty(self.showMode)
+        #     self.updateComboBox()
+        shape.content = text
+        shape.is_mark = is_mark
+        shape.content = content
+        # item.setBackground(generateColorByText(text))
+        self.setDirty(self.showMode)
+        self.updateComboBox()
 
     # 返回值给self.mImgList5，表示thumbnail显示的5张图片
     def indexTo5Files(self, currIndex, mode=0):
@@ -1632,8 +1666,31 @@ class MainWindow(QMainWindow):
         labelListDock.setWindowTitle("Label" + f" ({labelList.count()})")
 
     def modeChanged(self):
-        self.operateMode = self.modeButtonGroup.checkedId()
+        newMode = self.modeButtonGroup.checkedId()
+        if newMode == self.operateMode:
+            return
+
+        # 1. 存储之前模式的状态
+        if self.dirty[self.operateMode]:
+            self.mayContinue(self.operateMode)
+        # 2. 改变self.operateMode
+        self.operateMode = newMode
+
+        if self.operateMode == 0:
+            self.templateDock.setEnabled(True)
+            self.recogDock.setEnabled(False)
+        elif self.operateMode == 1:
+            self.templateDock.setEnabled(False)
+            self.recogDock.setEnabled(True)
+
+            # self.AutoRecognition.setEnabled(True)
+            # self.reRecogButton.setEnabled(True)
+            # self.actions.AutoRec.setEnabled(True)
+            # self.actions.reRec.setEnabled(True)
         print("current oprateMode is ", self.operateMode)
+
+    def on_templateFileName_input(self):
+        self.templateRecogButton.setEnabled(True)
 
     # TODO
     def remLabels(self, shapes):
@@ -1737,12 +1794,12 @@ class MainWindow(QMainWindow):
                 if shape.line_color != DEFAULT_LOCK_COLOR
             ]
         # Can add differrent annotation formats here
-        for box in self.result_dic:  # todo: 需要修改result_dic内数据, 添加新的项并修改位置
+        for box in self.result_dic:
             # trans_dic = {"label": box[1][0], "points": box[0], "difficult": False}
             trans_dic = {
-                "label": box[1],
-                "is_mark": box[2],
-                "content": box[3][0],
+                "label": box[2],
+                "is_mark": box[3],
+                "content": box[1][0],
                 "points": box[0],
                 "difficult": False,
             }
@@ -2362,6 +2419,7 @@ class MainWindow(QMainWindow):
             self.loadFilestate(dirpath, mode)
             self.PPlabelpath[mode] = dirpath + "/Label.txt"
             self.PPlabel[mode] = self.loadLabelFile(self.PPlabelpath[mode])
+            print(self.PPlabel[mode])
             if mode == 1:
                 self.Cachelabelpath = dirpath + "/Cache.cach"
                 self.Cachelabel = self.loadLabelFile(self.Cachelabelpath)
@@ -2403,6 +2461,10 @@ class MainWindow(QMainWindow):
             print("DirPath in importTemplateDirImages is", dirpath)
         elif mode == 1:
             print("DirPath in importRecognitionDirImages is", dirpath)
+            self.AutoRecognition.setEnabled(True)
+            self.reRecogButton.setEnabled(True)
+            self.actions.AutoRec.setEnabled(True)
+            self.actions.reRec.setEnabled(True)
 
         self.iconlist.clear()
         self.additems5(dirpath)
@@ -2411,11 +2473,6 @@ class MainWindow(QMainWindow):
         self.haveAutoReced = False
         self.actions.rotateLeft.setEnabled(True)
         self.actions.rotateRight.setEnabled(True)
-        if mode == 1 and self.operateMode == 1:
-            self.AutoRecognition.setEnabled(True)
-            self.reRecogButton.setEnabled(True)
-            self.actions.AutoRec.setEnabled(True)
-            self.actions.reRec.setEnabled(True)
 
         fileListWidget.setCurrentRow(0)  # set list index to first
         fileListWidget.setWindowTitle(
@@ -2493,8 +2550,7 @@ class MainWindow(QMainWindow):
                 box = [[int(p[0] * width), int(p[1] * height)] for p in shape["ratio"]]
                 # assert len(box) == 4
                 # 创建包含标签信息的结果列表，将边界框坐标插入到结果列表的开头
-                # result = [(shape["transcription"], 1)] # 这个1是已经识别的状态标志？
-                result = [shape["label"], shape["is_mark"], (shape["content"], 1)]
+                result = [(shape["content"], 1), shape["label"], shape["is_mark"]]
                 result.insert(0, box)
                 self.result_dic_locked.append(result)
             self.result_dic += self.result_dic_locked
@@ -2530,7 +2586,9 @@ class MainWindow(QMainWindow):
                     self.actions.saveLabel_1.setEnabled(True)
 
         elif mode_ == "Auto":
-            if annotationFilePath and self.saveLabels(annotationFilePath, mode_=mode_):
+            if annotationFilePath and self.saveLabels(
+                annotationFilePath, mode_=mode_, mode=mode
+            ):
                 self.setClean(mode)
                 self.statusBar().showMessage("Saved to  %s" % annotationFilePath)
                 self.statusBar().show()
@@ -2793,6 +2851,62 @@ class MainWindow(QMainWindow):
 
         # self.init_key_list(self.Cachelabel)
 
+    def templateRecognition(self):
+        msg = QMessageBox()
+        msg.setWindowTitle("Template Recognition")
+
+        if not self.mImgList[0]:
+            msg.setText(self.stringBundle.getString("msg_importTemplateDir"))
+            msg.exec_()
+            return
+
+        templateFileName = self.templateFileName.text().strip()
+        if templateFileName not in os.listdir(self.dirname[0]):
+            msg.setText(self.stringBundle.getString("msg_fileNameWrong"))
+            msg.exec_()
+            return
+
+        templateFile = os.path.join(os.path.basename(self.dirname[0]), templateFileName)
+        if templateFile not in self.PPlabel[0]:
+            msg.setText(self.stringBundle.getString("msg_templateNotDefined"))
+            msg.exec_()
+            return
+
+        print("templateFile is ", templateFile)
+        boxs = self.PPlabel[0][templateFile]
+        marks = []
+        for box in boxs:
+            if box["is_mark"]:
+                marks.append(box)
+        print("template boxs are: ", boxs)
+        print("template marks are: ", marks)
+        if len(marks) < 2:
+            msg.setText(self.stringBundle.getString("msg_lackMark"))
+            msg.exec_()
+            return
+
+        print("begin template recognition")
+        assert self.mImgList[1] is not None
+        print("Using model from ", self.model)
+
+        uncheckedList = [
+            i for i in self.mImgList[1] if i not in self.fileStatedict[1].keys()
+        ]
+        self.templateRecDialog = templateRecDialog(
+            parent=self,
+            ocr=self.ocr,
+            mImgList=uncheckedList,
+            lenbar=len(uncheckedList),
+            templateBoxs=boxs,
+        )
+        self.templateRecDialog.popUp()
+        self.currIndex[1] = len(self.mImgList[1]) - 1
+        self.loadFile(self.filePath, mode=1)  # ADD
+        self.templateRecogButton.setEnabled(False)
+        self.actions.templateRec.setEnabled(False)
+        self.setDirty(1)
+        self.saveCacheLabel()
+
     def reRecognition(self):
         img = cv2.imdecode(np.fromfile(self.filePath, dtype=np.uint8), 1)
         # org_box = [dic['points'] for dic in self.PPlabel[self.getImglabelidx(self.filePath)]]
@@ -2804,7 +2918,7 @@ class MainWindow(QMainWindow):
             rec_flag = 0
             for shape in self.canvas.shapes:
                 box = [[int(p.x()), int(p.y())] for p in shape.points]  # 四个点的坐标
-                shape_info = [shape.title, shape.is_mark]  # new
+                shape_info = [shape.label, shape.is_mark]  # new
 
                 assert len(box) == 4
 
@@ -2820,12 +2934,12 @@ class MainWindow(QMainWindow):
                 result = self.ocr.ocr(img_crop, cls=True, det=False)[0]
                 if result[0][0] != "":
                     if shape.line_color == DEFAULT_LOCK_COLOR:
-                        shape.label = result[0][0]
-                        result = shape_info + result
+                        shape.content = result[0][0]
+                        result = result + shape_info
                         result.insert(0, box)
                         self.result_dic_locked.append(result)
                     else:
-                        result = shape_info + result
+                        result = result + shape_info
                         result.insert(0, box)
                         self.result_dic.append(result)
                 else:
@@ -2833,14 +2947,14 @@ class MainWindow(QMainWindow):
                     if shape.line_color == DEFAULT_LOCK_COLOR:
                         shape.label = result[0][0]
                         self.result_dic_locked.append(
-                            [box, *shape_info, (self.noLabelText, 0)]
+                            [box, (self.noLabelText, 0), *shape_info]
                         )
                     else:
                         self.result_dic.append(
-                            [box, *shape_info, (self.noLabelText, 0)]
+                            [box, (self.noLabelText, 0), *shape_info]
                         )
                 try:
-                    if self.noLabelText == shape.label or result[3][0] == shape.label:
+                    if self.noLabelText == shape.label or result[1][0] == shape.label:
                         print("label no change")
                     else:
                         rec_flag += 1
@@ -2848,8 +2962,8 @@ class MainWindow(QMainWindow):
                     print("Can not recognise the box")
             if (len(self.result_dic) > 0 and rec_flag > 0) or self.canvas.lockedShapes:
                 self.canvas.isInTheSameImage = True
-                self.saveFile(mode_="Auto")
-                self.loadFile(self.filePath)
+                self.saveFile(mode_="Auto", mode=1)
+                self.loadFile(self.filePath, mode=1)
                 self.canvas.isInTheSameImage = False
                 self.setDirty(mode=1)
             elif len(self.result_dic) == len(self.canvas.shapes) and rec_flag == 0:
